@@ -1,0 +1,17 @@
+/target/
+/dist/
+/build/
+/release/
+/.vs/
+/.idea/
+/.vscode/
+*.log
+*.pdb
+*.ilk
+*.tmp
+*.bak
+soon-link-pro-settings.json
+soon-link-pro-virtual-devices.log
+/drivers/*.exe
+Thumbs.db
+Desktop.ini

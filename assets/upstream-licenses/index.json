@@ -1,0 +1,55 @@
+{
+  "accesskit": [
+    "accesskit-LICENSE-MIT.txt",
+    "accesskit-LICENSE-APACHE.txt"
+  ],
+  "clipboard-win": [
+    "clipboard-win-LICENSE.txt"
+  ],
+  "dasp_sample": [
+    "dasp_sample-LICENSE-MIT.txt",
+    "dasp_sample-LICENSE-APACHE.txt"
+  ],
+  "ecolor": [
+    "ecolor-LICENSE-MIT.txt",
+    "ecolor-LICENSE-APACHE.txt"
+  ],
+  "eframe": [
+    "eframe-LICENSE-MIT.txt",
+    "eframe-LICENSE-APACHE.txt"
+  ],
+  "egui": [
+    "egui-LICENSE-MIT.txt",
+    "egui-LICENSE-APACHE.txt"
+  ],
+  "egui-winit": [
+    "egui-winit-LICENSE-MIT.txt",
+    "egui-winit-LICENSE-APACHE.txt"
+  ],
+  "egui_glow": [
+    "egui_glow-LICENSE-MIT.txt",
+    "egui_glow-LICENSE-APACHE.txt"
+  ],
+  "emath": [
+    "emath-LICENSE-MIT.txt",
+    "emath-LICENSE-APACHE.txt"
+  ],
+  "epaint": [
+    "epaint-LICENSE-MIT.txt",
+    "epaint-LICENSE-APACHE.txt"
+  ],
+  "epaint_default_fonts": [
+    "epaint_default_fonts-LICENSE-MIT.txt",
+    "epaint_default_fonts-LICENSE-APACHE.txt"
+  ],
+  "gl_generator": [
+    "gl_generator-LICENSE.txt"
+  ],
+  "khronos_api": [
+    "khronos_api-LICENSE.txt"
+  ],
+  "profiling": [
+    "profiling-LICENSE-MIT.txt",
+    "profiling-LICENSE-APACHE.txt"
+  ]
+}

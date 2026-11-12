@@ -1,0 +1,11 @@
+[package]
+name = "soon-link-pro-asio"
+version = "2.4.4-dev"
+edition = "2021"
+[lib]
+name = "patchbay_asio"
+crate-type = ["cdylib"]
+[dependencies]
+bridge = { path = "../bridge" }
+winreg = "0.55"
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_LibraryLoader", "Win32_System_Threading", "Win32_Media"] }

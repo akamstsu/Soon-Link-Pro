@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
+  <title id="title">Soon Link Pro</title>
+  <desc id="desc">A continuous signal path folds into an S, connecting mint and violet on a dark rounded tile.</desc>
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#1A2332"/>
+      <stop offset="1" stop-color="#10141E"/>
+    </linearGradient>
+    <linearGradient id="signal" x1="308" y1="300" x2="706" y2="740" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#75E5D4"/>
+      <stop offset=".43" stop-color="#6FC9E8"/>
+      <stop offset="1" stop-color="#B19BFA"/>
+    </linearGradient>
+  </defs>
+  <rect x="24" y="24" width="976" height="976" rx="224" fill="url(#tile)"/>
+  <rect x="25" y="25" width="974" height="974" rx="223" fill="none" stroke="#303B50" stroke-width="2"/>
+  <path d="M730 300H438C348 300 292 352 292 420S348 520 438 520H586C676 520 732 552 732 620S676 740 586 740H294"
+        fill="none" stroke="url(#signal)" stroke-width="112" stroke-linecap="round"/>
+</svg>
