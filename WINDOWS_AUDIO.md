@@ -1,4 +1,4 @@
-# Soon Link Pro R2.4.4-dev · Windows x64
+# Soon Link Pro R2.4.5-dev · Windows x64
 
 © 2026 挚彬Club · 作者：赤松_Akamatsu · 官网：https://www.zhibin.club
 关于页显示用户提供的挚彬Club Logo；第三方版权、来源和完整许可证保留。
