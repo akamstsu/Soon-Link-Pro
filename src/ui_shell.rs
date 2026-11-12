@@ -380,46 +380,151 @@ pub fn intro(ui: &mut Ui, title: &str, description: &str) {
     ui.add_space(14.0);
 }
 
+fn curve_at(points: [Pos2; 4], t: f32) -> Pos2 {
+    let u = 1.0 - t;
+    (points[0].to_vec2() * u * u * u
+        + points[1].to_vec2() * 3.0 * u * u * t
+        + points[2].to_vec2() * 3.0 * u * t * t
+        + points[3].to_vec2() * t * t * t)
+        .to_pos2()
+}
+
+fn smooth_step(t: f32) -> f32 {
+    let t = t.clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
+fn cable_color(source: Color32, target: Color32, t: f32) -> Color32 {
+    // Only the final quarter takes on the destination color.
+    let mix = smooth_step((t - 0.72) / 0.28) * 0.72;
+    Color32::from_rgb(
+        lerp(source.r() as f32..=target.r() as f32, mix) as u8,
+        lerp(source.g() as f32..=target.g() as f32, mix) as u8,
+        lerp(source.b() as f32..=target.b() as f32, mix) as u8,
+    )
+}
+
+// Bound the curve-to-chord error in physical pixels, including high-DPI screens.
+fn curve_segments(points: [Pos2; 4], pixels_per_point: f32) -> usize {
+    let a = (points[2] - points[1]) - (points[1] - points[0]);
+    let b = (points[3] - points[2]) - (points[2] - points[1]);
+    let acceleration = 6.0 * a.length().max(b.length());
+    let tolerance = 0.20 / pixels_per_point;
+    (acceleration / (8.0 * tolerance))
+        .sqrt()
+        .ceil()
+        .clamp(16.0, 256.0) as usize
+}
+
+fn ribbon_sample(
+    mesh: &mut epaint::Mesh,
+    position: Pos2,
+    normal: Vec2,
+    width: f32,
+    feather: f32,
+    color: Color32,
+    connect: bool,
+) {
+    // Custom meshes bypass egui's path feathering. Add a one-physical-pixel
+    // alpha ramp on both edges so diagonal lines retain subpixel coverage.
+    let inner = (width - feather).max(0.0) * 0.5;
+    let outer = (width + feather) * 0.5;
+    let i = mesh.vertices.len() as u32;
+    mesh.colored_vertex(position + normal * outer, Color32::TRANSPARENT);
+    mesh.colored_vertex(position + normal * inner, color);
+    mesh.colored_vertex(position - normal * inner, color);
+    mesh.colored_vertex(position - normal * outer, Color32::TRANSPARENT);
+    if connect {
+        for edge in 0..3 {
+            mesh.add_triangle(i - 4 + edge, i - 3 + edge, i + edge);
+            mesh.add_triangle(i - 3 + edge, i + edge + 1, i + edge);
+        }
+    }
+}
+
+pub fn route_cable(
+    painter: &Painter,
+    points: [Pos2; 4],
+    source: Color32,
+    target: Color32,
+    width: f32,
+    opacity: f32,
+) {
+    let pixels_per_point = painter.ctx().pixels_per_point().max(0.1);
+    let segments = curve_segments(points, pixels_per_point);
+    let mut mesh = epaint::Mesh::default();
+    mesh.vertices.reserve((segments + 1) * 4);
+    mesh.indices.reserve(segments * 18);
+    for segment in 0..=segments {
+        let t = segment as f32 / segments as f32;
+        let position = curve_at(points, t);
+        let tangent =
+            curve_at(points, (t + 0.001).min(1.0)) - curve_at(points, (t - 0.001).max(0.0));
+        ribbon_sample(
+            &mut mesh,
+            position,
+            tangent.normalized().rot90(),
+            width,
+            1.0 / pixels_per_point,
+            cable_color(source, target, t).gamma_multiply(opacity),
+            segment > 0,
+        );
+    }
+    painter.add(mesh);
+}
+
 pub fn signal_beam(
     painter: &Painter,
     points: [Pos2; 4],
     phase: f32,
-    color: Color32,
+    source: Color32,
+    target: Color32,
     strength: f32,
 ) {
-    let at = |t: f32| {
-        let u = 1.0 - t;
-        (points[0].to_vec2() * u * u * u
-            + points[1].to_vec2() * 3.0 * u * u * t
-            + points[2].to_vec2() * 3.0 * u * t * t
-            + points[3].to_vec2() * t * t * t)
-            .to_pos2()
-    };
+    // Let the head travel beyond the destination so the tail drains into the port
+    // before the cycle wraps. Fade the whole beam smoothly on arrival and departure.
+    let head = phase * 1.20;
+    let envelope = smooth_step(head / 0.06) * (1.0 - smooth_step((head - 0.88) / 0.30));
+    let tail = (head - 0.16).max(0.0);
+    let end = head.min(1.0);
+    if tail >= end || envelope <= 0.0 {
+        return;
+    }
+    let pixels_per_point = painter.ctx().pixels_per_point().max(0.1);
+    let segments = ((curve_segments(points, pixels_per_point) as f32 * (end - tail)).ceil()
+        as usize)
+        .clamp(8, 64);
     let mut mesh = epaint::Mesh::default();
-    let tail = (phase - 0.128).max(0.0);
-    // All layers end exactly at phase. Nothing is drawn in front of the head.
+    mesh.vertices.reserve((segments + 1) * 4 * 3);
+    mesh.indices.reserve(segments * 18 * 3);
     for (width, opacity) in [(7.0, 0.07), (3.8, 0.16), (1.9, 1.0)] {
-        let base = mesh.vertices.len() as u32;
-        for segment in 0..=16 {
-            let fraction = segment as f32 / 16.0;
-            let t = tail + (phase - tail) * fraction;
-            let position = at(t);
-            let tangent = at((t + 0.001).min(1.0)) - at((t - 0.001).max(0.0));
-            let normal = tangent.normalized().rot90() * width * 0.5;
-            let alpha = ((t - (phase - 0.128)) / 0.128).clamp(0.0, 1.0) * strength * opacity;
-            mesh.colored_vertex(position + normal, color.gamma_multiply(alpha));
-            mesh.colored_vertex(position - normal, color.gamma_multiply(alpha));
-            if segment > 0 {
-                let i = base + segment * 2;
-                mesh.add_triangle(i - 2, i - 1, i);
-                mesh.add_triangle(i - 1, i + 1, i);
-            }
+        for segment in 0..=segments {
+            let fraction = segment as f32 / segments as f32;
+            let t = lerp(tail..=end, fraction);
+            let position = curve_at(points, t);
+            let tangent =
+                curve_at(points, (t + 0.001).min(1.0)) - curve_at(points, (t - 0.001).max(0.0));
+            let normal = tangent.normalized().rot90();
+            let alpha = smooth_step((t - (head - 0.16)) / 0.16) * strength * opacity * envelope;
+            let color = cable_color(source, target, t).gamma_multiply(alpha);
+            ribbon_sample(
+                &mut mesh,
+                position,
+                normal,
+                width,
+                1.0 / pixels_per_point,
+                color,
+                segment > 0,
+            );
         }
     }
     painter.add(mesh);
-    painter.circle_filled(
-        at(phase),
-        2.0,
-        Color32::WHITE.gamma_multiply(strength * 0.85),
-    );
+    if head < 1.0 {
+        let arrival = 1.0 - smooth_step((head - 0.90) / 0.10);
+        painter.circle_filled(
+            curve_at(points, head),
+            2.0,
+            Color32::WHITE.gamma_multiply(strength * envelope * arrival * 0.85),
+        );
+    }
 }

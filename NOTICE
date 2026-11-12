@@ -4,7 +4,7 @@ Copyright (c) 2026 挚彬Club
 https://www.zhibin.club
 
 本声明适用于项目原创部分，不替代第三方组件的版权和许可。
-主项目发布许可证待版权方确定。
+项目原创代码使用 MIT 许可证，见 LICENSE。第三方组件继续适用各自许可证。
 第三方声明：assets/THIRD_PARTY_NOTICES.md
 USB/IP 音频组件：vendor/usbip-audio/LICENSE
 USB/IP Windows 驱动：assets/usbip-win2-LICENSE.txt

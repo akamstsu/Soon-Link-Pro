@@ -4,17 +4,24 @@
 #ifndef InstallerOutput
   #error InstallerOutput is required
 #endif
+#ifndef AppVersion
+  #error AppVersion is required
+#endif
+#ifndef AppDisplayVersion
+  #error AppDisplayVersion is required
+#endif
 [Setup]
 AppId={{29A9AA46-075D-4AC4-9839-AFD35A3F784C}
 AppName=Soon Link Pro
-AppVersion=2.4.4
-AppVerName=Soon Link Pro R2.4.4-dev
+AppVersion={#AppVersion}
+AppVerName=Soon Link Pro R{#AppDisplayVersion}
 AppPublisher=挚彬Club · 赤松_Akamatsu
 AppPublisherURL=https://www.zhibin.club
 AppSupportURL=https://www.zhibin.club
 DefaultDirName={autopf}\Soon Link Pro
 DefaultGroupName=Soon Link Pro
 DisableProgramGroupPage=yes
+DisableWelcomePage=yes
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0.18362
@@ -27,7 +34,7 @@ RestartApplications=no
 UninstallDisplayIcon={app}\SoonLinkPro.exe
 SetupIconFile={#PayloadDir}\assets\soon-link-pro-icon-v2.ico
 OutputDir={#InstallerOutput}
-OutputBaseFilename=Soon-Link-Pro-R2.4.4-dev-Setup-x64
+OutputBaseFilename=Soon-Link-Pro-R{#AppDisplayVersion}-Setup-x64
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
@@ -35,7 +42,7 @@ SetupLogging=yes
 VersionInfoCompany=挚彬Club
 VersionInfoDescription=Soon Link Pro 安装程序
 VersionInfoCopyright=© 2026 挚彬Club · 赤松_Akamatsu
-InfoBeforeFile={#PayloadDir}\安装说明.txt
+LicenseFile={#PayloadDir}\licenses\LICENSE
 
 [Languages]
 Name: "chinesesimp"; MessagesFile: "{#SourcePath}ChineseSimplified.isl"

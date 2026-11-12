@@ -178,9 +178,20 @@ impl Graph {
         }
     }
     pub fn virtual_name(&self, input: bool, bus: usize) -> String {
-        self.card_name(input, &format!("virtual:{bus}"))
-            .map(str::to_owned)
-            .unwrap_or_else(|| crate::usb_audio::name(bus))
+        self.group_display_name(
+            input,
+            &format!("virtual:{bus}"),
+            &crate::usb_audio::name(bus),
+        )
+    }
+    pub fn group_display_name(&self, input: bool, group: &str, original: &str) -> String {
+        match self
+            .card_name(input, group)
+            .filter(|note| !note.trim().is_empty())
+        {
+            Some(note) => format!("{original} ({note})"),
+            None => original.to_owned(),
+        }
     }
     pub fn channel_name(&self, input: bool, index: usize) -> String {
         let node = if input {
@@ -189,31 +200,12 @@ impl Graph {
             &self.outputs[index]
         };
         let group = Self::card_group(&node.key);
-        if let Some(name) = self.card_name(input, &group) {
-            let ch = node
-                .key
-                .rsplit(':')
-                .next()
-                .and_then(|s| s.parse::<usize>().ok())
-                .unwrap_or(0);
-            let other = format!("hardware:{}", ch ^ 1);
-            let mono = node.key.starts_with("hardware:")
-                && !(if input { &self.inputs } else { &self.outputs })
-                    .iter()
-                    .any(|n| n.key == other);
-            format!(
-                "{name} · {}",
-                if mono {
-                    "MONO"
-                } else if ch % 2 == 0 {
-                    "L"
-                } else {
-                    "R"
-                }
-            )
+        let original = if node.device_name.is_empty() {
+            &node.name
         } else {
-            node.name.clone()
-        }
+            &node.device_name
+        };
+        self.group_display_name(input, &group, original)
     }
     fn migrate_card_names(&mut self) {
         for value in self.card_names.values_mut() {
@@ -389,7 +381,7 @@ impl Graph {
             return Err("这组虚拟总线已不存在".into());
         }
         if self.bus_count <= 1 {
-            return Err("至少保留一组虚拟输入／输出以兼容 DAW；不需要显示时可隐藏卡片。".into());
+            return Err("至少保留一组虚拟输入／输出以兼容 DAW；不需要显示时可隐藏通道组。".into());
         }
         let prefix = format!("virtual:{bus}:");
         let keep_inputs: Vec<_> = self
@@ -1752,5 +1744,51 @@ fn decode_asio_name(bytes: &[u8]) -> String {
         } else {
             String::from_utf8_lossy(bytes).to_string()
         }
+    }
+}
+
+#[cfg(test)]
+mod note_tests {
+    use super::*;
+
+    #[test]
+    fn group_notes_keep_original_names_and_directions_after_reload() {
+        let mut graph = Graph::new(2, 2);
+        let original_inputs: Vec<_> = graph.inputs.iter().map(|n| n.device_name.clone()).collect();
+        graph.set_card_name(true, "virtual:0", "人声返送");
+        graph.set_card_name(false, "virtual:0", "直播发送");
+        let value = serde_json::to_value(&graph).unwrap();
+        assert!(value.get("card_names").is_some());
+        let restored = Graph::from_value(value).unwrap();
+        assert_eq!(
+            restored.virtual_name(true, 0),
+            format!("{} (人声返送)", crate::usb_audio::name(0))
+        );
+        assert_eq!(
+            restored.virtual_name(false, 0),
+            format!("{} (直播发送)", crate::usb_audio::name(0))
+        );
+        for (index, node) in restored.inputs.iter().enumerate() {
+            assert_eq!(node.device_name, original_inputs[index]);
+            if node.key.starts_with("virtual:0:") {
+                assert_eq!(
+                    restored.channel_name(true, index),
+                    format!("{} (人声返送)", node.device_name)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn removing_note_preserves_routes_gains_and_system_metadata() {
+        let mut graph = Graph::new(2, 2);
+        graph.inputs[0].fader = 0.37;
+        graph.routes[0][0].on = true;
+        graph.routes[0][0].fader = 0.61;
+        let before = serde_json::to_value(&graph).unwrap();
+        graph.set_card_name(true, "hardware:0", "  话筒\n  ");
+        assert_eq!(graph.card_name(true, "hardware:0"), Some("话筒"));
+        graph.set_card_name(true, "hardware:0", "  ");
+        assert_eq!(serde_json::to_value(graph).unwrap(), before);
     }
 }

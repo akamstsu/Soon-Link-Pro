@@ -300,17 +300,17 @@ impl ButtonPalette {
         };
         Self {
             idle: if active {
-                mix(0.12)
+                mix(0.28)
             } else {
                 Color32::from_rgb(31, 37, 49)
             },
             hovered: if active {
-                mix(0.18)
+                mix(0.36)
             } else {
                 Color32::from_rgb(40, 47, 62)
             },
             pressed: if active {
-                mix(0.23)
+                mix(0.43)
             } else {
                 Color32::from_rgb(47, 55, 71)
             },

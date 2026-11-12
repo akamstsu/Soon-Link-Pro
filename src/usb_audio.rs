@@ -177,7 +177,7 @@ impl Transport {
                     log(&format!("{} attached on USB/IP port {}",name(bus),port));
                 }
                 p.system_driver_active.store(true,Ordering::Release);
-                *report.lock().unwrap()=format!("{} 组 USB 设备已连接 · 卡片备注仅保存在本软件",p.virtual_buses);
+                *report.lock().unwrap()=format!("{} 组 USB 设备已连接 · 通道组备注仅保存在本软件",p.virtual_buses);
                 while !signal.load(Ordering::Acquire) {
                     thread::park_timeout(Duration::from_millis(100));
                 }

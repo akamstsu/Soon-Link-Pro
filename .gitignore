@@ -15,3 +15,5 @@ soon-link-pro-virtual-devices.log
 /drivers/*.exe
 Thumbs.db
 Desktop.ini
+__pycache__/
+*.pyc

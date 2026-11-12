@@ -10,7 +10,7 @@ mod ui_shell;
 mod usb_audio;
 mod widgets;
 use audio::{Config, Graph};
-use eframe::egui::{epaint::CubicBezierShape, *};
+use eframe::egui::*;
 use serde::{Deserialize, Serialize};
 use std::{
     path::PathBuf,
@@ -58,6 +58,7 @@ struct ChannelCard {
     all_muted: bool,
     any_muted: bool,
     title: String,
+    original_title: String,
     indices: Vec<usize>,
     color: Color32,
 }
@@ -453,7 +454,7 @@ impl App {
                     }
                 }
                 self.dirty = true;
-                self.status = "卡片已移出面板，接线和声音仍保留；可在通道管理中恢复。".into();
+                self.status = "通道组已移出面板，接线和声音仍保留；可在通道管理中恢复。".into();
             }
             CardAction::RemoveBus(bus) => match self.graph.remove_bus(bus) {
                 Ok(()) => {
@@ -685,15 +686,20 @@ impl App {
                 }
             }
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if button(
+                if widgets::action_tinted(
                     ui,
-                    RichText::new(if self.panic {
+                    if self.panic {
+                        Icon::Muted
+                    } else {
+                        Icon::Volume
+                    },
+                    if self.panic {
                         "恢复输出"
                     } else {
                         "全部静音"
-                    })
-                    .color(COLORS[3]),
+                    },
                     self.panic,
+                    COLORS[3],
                 )
                 .on_hover_text("紧急关闭全部输出；再次点击恢复")
                 .clicked()
@@ -710,24 +716,21 @@ impl App {
                 }
             });
         });
-        ui.add_space(10.0);
+        ui.add_space(4.0);
         Frame::new()
-            .fill(Color32::TRANSPARENT)
-            .corner_radius(8.0)
-            .inner_margin(Margin::symmetric(14, 10))
+            .inner_margin(Margin::symmetric(2, 2))
             .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label(
-                        RichText::new(if self.config.backend == 1 {
+                ui.spacing_mut().item_spacing = vec2(8.0, 0.0);
+                ui.horizontal_wrapped(|ui| {
+                    ui.set_min_height(22.0);
+                    small(
+                        ui,
+                        if self.config.backend == 1 {
                             "ASIO"
                         } else {
                             "WASAPI"
-                        })
-                        .size(12.0)
-                        .color(ACCENT)
-                        .strong(),
+                        },
                     );
-                    ui.separator();
                     let dev = if self.config.backend == 1 {
                         if self.config.asio_name.is_empty() {
                             "未选择声卡"
@@ -739,34 +742,33 @@ impl App {
                     } else {
                         &self.config.output
                     };
-                    ui.label(RichText::new(dev).size(12.0));
-                    ui.separator();
-                    small(ui, &format!("{:.1} kHz", self.config.rate as f32 / 1000.0));
-                    ui.separator();
+                    ui.add(Label::new(RichText::new(dev).size(12.0)).truncate())
+                        .on_hover_text(dev);
                     small(
                         ui,
-                        &if self.config.backend == 1 {
-                            format!(
-                                "{} samples · {:.2} ms / block",
-                                self.config.buffer,
-                                self.config.buffer as f64 / self.config.rate as f64 * 1000.0
-                            )
-                        } else {
-                            "系统缓冲 · 共享模式".into()
-                        },
+                        &format!("· {:.1} kHz", self.config.rate as f32 / 1000.0),
                     );
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        small(
-                            ui,
-                            &format!(
-                                "{} 条连接",
-                                self.graph.routes.iter().flatten().filter(|r| r.on).count()
-                            ),
-                        );
-                    });
+                    let buffer = if self.config.backend == 1 {
+                        format!(
+                            "· {} samples · {:.2} ms / block",
+                            self.config.buffer,
+                            self.config.buffer as f64 / self.config.rate.max(1) as f64 * 1000.0
+                        )
+                    } else {
+                        "· 系统缓冲 · 共享模式".into()
+                    };
+                    ui.label(RichText::new(buffer).size(11.0).color(MUTED))
+                        .on_hover_text("每块时长不代表端到端或往返音频延迟。");
+                    small(
+                        ui,
+                        &format!(
+                            "· {} 条连接",
+                            self.graph.routes.iter().flatten().filter(|r| r.on).count()
+                        ),
+                    );
                 });
             });
-        ui.add_space(18.0);
+        ui.add_space(4.0);
     }
     fn channel_color(key: &str) -> Color32 {
         let index = if let Some(ch) = key
@@ -798,16 +800,10 @@ impl App {
     }
     fn open_card_rename(&mut self, input: bool, group: &str) {
         self.rename = None;
-        let title = self
-            .channel_cards(input)
-            .iter()
-            .find(|card| card.group == group)
-            .map(|card| card.title.clone())
-            .unwrap_or_default();
         self.card_rename = Some(CardRename {
             input,
             group: group.into(),
-            draft: self.graph.card_name(input, group).unwrap_or(&title).into(),
+            draft: self.graph.card_name(input, group).unwrap_or("").into(),
             focus: true,
         });
     }
@@ -854,6 +850,9 @@ impl App {
         self.audio_sync_pending = true;
     }
     fn channel_cards(&self, input: bool) -> Vec<ChannelCard> {
+        self.channel_groups(input, false)
+    }
+    fn channel_groups(&self, input: bool, include_hidden: bool) -> Vec<ChannelCard> {
         let nodes = if input {
             &self.graph.inputs
         } else {
@@ -870,7 +869,8 @@ impl App {
         let mut cards: Vec<ChannelCard> = Vec::new();
         let mut keys: Vec<String> = Vec::new();
         for (index, node) in nodes.iter().enumerate().filter(|(_, n)| {
-            n.visible && (!n.key.starts_with("hardware:") || self.hardware_available)
+            (include_hidden || n.visible)
+                && (include_hidden || !n.key.starts_with("hardware:") || self.hardware_available)
         }) {
             let (group, title) = if let Some(ch) = node
                 .key
@@ -909,7 +909,7 @@ impl App {
                     .nth(1)
                     .and_then(|s| s.parse::<usize>().ok())
                     .unwrap_or(0);
-                let title = self.graph.virtual_name(input, bus);
+                let title = crate::usb_audio::name(bus);
                 (format!("virtual:{bus}"), title)
             } else if node.key.starts_with("system:") {
                 (String::from("system"), String::from("系统声音"))
@@ -928,11 +928,10 @@ impl App {
                     .unwrap_or_else(|| node.name.clone());
                 (root.to_string(), title)
             };
+            let original_title = title;
             let title = self
                 .graph
-                .card_name(input, &group)
-                .unwrap_or(&title)
-                .to_owned();
+                .group_display_name(input, &group, &original_title);
             if let Some(slot) = keys.iter().position(|key| key == &group) {
                 cards[slot].indices.push(index);
             } else {
@@ -944,6 +943,7 @@ impl App {
                     any_muted: muted > 0,
                     group,
                     title,
+                    original_title,
                     indices: vec![index],
                     color: Self::channel_color(&node.key),
                 });
@@ -1102,21 +1102,21 @@ impl App {
                 if !painter.clip_rect().intersects(cable_rect) {
                     continue;
                 }
-                painter.add(CubicBezierShape::from_points_stroke(
+                let target_color = Self::channel_color(&self.graph.outputs[o].key);
+                ui_shell::route_cable(
+                    &painter,
                     points,
-                    false,
-                    Color32::TRANSPARENT,
-                    Stroke::new(
-                        if selected { 2.1 } else { 1.4 },
-                        color.gamma_multiply(if muted {
-                            0.10
-                        } else if selected {
-                            0.85
-                        } else {
-                            0.35
-                        }),
-                    ),
-                ));
+                    color,
+                    target_color,
+                    if selected { 2.1 } else { 1.4 },
+                    if muted {
+                        0.10
+                    } else if selected {
+                        0.85
+                    } else {
+                        0.35
+                    },
+                );
                 let signal = self.levels.get(i).copied().unwrap_or(0.0)
                     * bridge::gain(self.graph.inputs[i].fader)
                     * bridge::gain(route.fader)
@@ -1127,7 +1127,7 @@ impl App {
                         ((20.0 * signal.max(0.0001).log10() + 65.0) / 65.0).clamp(0.15, 1.0);
                     // One gradient mesh rather than dozens of separate glowing strokes.
                     // Its final sample and the head use precisely the same curve parameter.
-                    ui_shell::signal_beam(&painter, points, phase, color, strength);
+                    ui_shell::signal_beam(&painter, points, phase, color, target_color, strength);
                     // The renderer's vsync paces active animation; a timer here can miss
                     // every other refresh once drawing time is added to its delay.
                     if self.low_power_animation || !ui.input(|i| i.focused) {
@@ -1246,11 +1246,11 @@ impl App {
             any_muted,
             if any_muted { COLORS[3] } else { MUTED },
             if all_muted {
-                "整张卡片已静音 · 点击恢复全部声道（含隐藏声道）"
+                "整个通道组已静音 · 点击恢复全部声道（含隐藏声道）"
             } else if any_muted {
-                "部分声道沿用旧配置静音 · 点击静音整张卡片，再点恢复全部；各声道音量不变"
+                "部分声道沿用旧配置静音 · 点击静音整个通道组，再点恢复全部；各声道音量不变"
             } else {
-                "静音整张卡片（含隐藏声道），保留各声道音量"
+                "静音整个通道组（含隐藏声道），保留各声道音量"
             },
         )
         .clicked()
@@ -1292,7 +1292,7 @@ impl App {
         menu_ui.spacing_mut().button_padding = vec2(5.0, 2.0);
         menu_ui.menu_button(RichText::new("···").size(18.0), |ui| {
             ui.label(RichText::new(&card.title).size(12.0).color(MUTED));
-            if ui.button("设置卡片备注…").clicked() {
+            if ui.button("设置通道组备注…").clicked() {
                 self.open_card_rename(input, &card.group);
                 ui.close_menu();
             }
@@ -1346,7 +1346,7 @@ impl App {
                 Sense::click(),
             )
             .on_hover_text(format!(
-                "{}\n点击设置卡片备注，通道后缀自动生成",
+                "{}\n点击设置通道组备注，显示为 原名 (备注)",
                 card.title
             ))
             .clicked()
@@ -1458,7 +1458,7 @@ impl App {
                     Sense::click(),
                 )
                 .on_hover_text(format!(
-                    "{}\n原始通道：{}\n点击调整声道；备注请点击卡片标题。",
+                    "{}\n原始通道：{}\n点击调整声道；备注请点击通道组标题。",
                     name, node.device_name
                 ))
                 .clicked()
@@ -1523,58 +1523,156 @@ impl App {
             })
             .map(|(i, _)| i)
             .collect::<Vec<_>>();
-        if inputs.is_empty() || outputs.is_empty() {
-            ui.label("请先添加通道，或在通道管理中选择显示的输入和输出。");
-            return;
-        }
+        let panel_width = ui.available_width();
         Frame::new()
-            .fill(Color32::TRANSPARENT)
-            .corner_radius(10.0)
-            .inner_margin(20.0)
+            .fill(PANEL)
+            .corner_radius(14.0)
+            .inner_margin(18.0)
             .show(ui, |ui| {
-                ui.set_min_height(height - 40.0);
-                let cw = ((ui.available_width() - 210.0) / outputs.len() as f32).max(120.0);
-                ScrollArea::horizontal().show(ui, |ui| {
-                    Grid::new("matrix")
-                        .spacing(vec2(12.0, 15.0))
-                        .show(ui, |ui| {
-                            ui.allocate_space(vec2(185.0, 30.0));
-                            for &o in &outputs {
-                                ui.add_sized(
-                                    [cw - 12.0, 30.0],
-                                    Label::new(
-                                        RichText::new(self.graph.channel_name(false, o))
-                                            .size(12.0)
-                                            .color(COLORS[o % COLORS.len()]),
-                                    ),
-                                );
+                ui.set_min_size(vec2(
+                    (panel_width - 36.0).max(0.0),
+                    (height - 36.0).max(0.0),
+                ));
+                if inputs.is_empty() || outputs.is_empty() {
+                    small(ui, "请先添加通道，或在通道管理中选择显示的输入和输出。");
+                    return;
+                }
+                // Fixed square cells prevent both long labels and sparse layouts stretching columns.
+                const CELL: f32 = 34.0;
+                const LABEL: f32 = 184.0;
+                const HEADER: f32 = 100.0;
+                let size = vec2(
+                    LABEL + CELL * outputs.len() as f32,
+                    HEADER + CELL * inputs.len() as f32,
+                );
+                small(
+                    ui,
+                    "输入 ↓ / 输出 →    点击切换接线 · 右键或双击调整连接 · 悬停查看完整名称",
+                );
+                ScrollArea::horizontal()
+                    .id_salt("compact_matrix_scroll")
+                    .auto_shrink([false, true])
+                    .show(ui, |ui| {
+                        let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
+                        let p = ui.painter_at(rect);
+                        let single_line = |name: &str, font: FontId, color: Color32, width: f32| {
+                            let mut job = text::LayoutJob::simple(
+                                name.replace(['\r', '\n'], " "),
+                                font,
+                                color,
+                                width,
+                            );
+                            job.wrap.max_rows = 1;
+                            job.wrap.break_anywhere = true;
+                            p.layout_job(job)
+                        };
+                        for (column, &o) in outputs.iter().enumerate() {
+                            let cell = Rect::from_min_size(
+                                rect.min + vec2(LABEL + column as f32 * CELL, 0.0),
+                                vec2(CELL, HEADER),
+                            );
+                            let name = self.graph.channel_name(false, o);
+                            let color = Self::channel_color(&self.graph.outputs[o].key);
+                            let galley = single_line(
+                                &name,
+                                FontId::proportional(11.0),
+                                color,
+                                HEADER - 16.0,
+                            );
+                            let text_height = galley.size().y;
+                            p.with_clip_rect(cell.shrink(5.0)).add(
+                                epaint::TextShape::new(
+                                    pos2(cell.center().x - text_height * 0.5, cell.bottom() - 8.0),
+                                    galley,
+                                    color,
+                                )
+                                .with_angle(-std::f32::consts::FRAC_PI_2),
+                            );
+                            ui.interact(cell, Id::new(("matrix_output", o)), Sense::hover())
+                                .on_hover_text(name);
+                        }
+                        for (row, &i) in inputs.iter().enumerate() {
+                            let y = rect.top() + HEADER + row as f32 * CELL;
+                            let label =
+                                Rect::from_min_size(pos2(rect.left(), y), vec2(LABEL, CELL));
+                            if !ui.is_rect_visible(Rect::from_min_size(
+                                pos2(rect.left(), y),
+                                vec2(size.x, CELL),
+                            )) {
+                                continue;
                             }
-                            ui.end_row();
-                            for &i in &inputs {
-                                ui.label(
-                                    RichText::new(self.graph.channel_name(true, i)).size(14.0),
+                            let name = self.graph.channel_name(true, i);
+                            let galley =
+                                single_line(&name, FontId::proportional(12.0), TEXT, LABEL - 16.0);
+                            let text_height = galley.size().y;
+                            p.with_clip_rect(label.shrink(4.0)).galley(
+                                label.min + vec2(8.0, (CELL - text_height) * 0.5),
+                                galley,
+                                TEXT,
+                            );
+                            ui.interact(label, Id::new(("matrix_input", i)), Sense::hover())
+                                .on_hover_text(&name);
+                            for (column, &o) in outputs.iter().enumerate() {
+                                let cell = Rect::from_min_size(
+                                    pos2(rect.left() + LABEL + column as f32 * CELL, y),
+                                    vec2(CELL, CELL),
                                 );
-                                for &o in &outputs {
-                                    let route = self.graph.routes[i][o];
-                                    let response = widgets::sized_text_button(
-                                        ui,
-                                        if route.on { "●  已连接" } else { "+" },
-                                        route.on,
-                                        COLORS[o % COLORS.len()],
-                                        vec2(cw - 12.0, 48.0),
-                                    );
-                                    if response.double_clicked() {
-                                        self.route = Some((i, o));
-                                    } else if response.clicked() {
-                                        self.graph.routes[i][o].on = !route.on;
-                                        self.dirty = true;
-                                        self.audio_sync_pending = true;
-                                    }
+                                if !ui.is_rect_visible(cell) {
+                                    continue;
                                 }
-                                ui.end_row();
+                                let route = self.graph.routes[i][o];
+                                let response = ui.interact(
+                                    cell,
+                                    Id::new(("matrix_route", i, o)),
+                                    Sense::click(),
+                                );
+                                let color = Self::channel_color(&self.graph.outputs[o].key);
+                                p.rect_filled(
+                                    cell.shrink(2.0),
+                                    5.0,
+                                    if response.hovered() {
+                                        Color32::from_rgb(48, 54, 70)
+                                    } else if route.on {
+                                        color.gamma_multiply(0.20)
+                                    } else {
+                                        CARD
+                                    },
+                                );
+                                if route.on {
+                                    let muted = route.mute
+                                        || self.graph.inputs[i].mute
+                                        || self.graph.outputs[o].mute
+                                        || self.panic;
+                                    p.circle_filled(
+                                        cell.center(),
+                                        4.5,
+                                        if muted { MUTED } else { color },
+                                    );
+                                } else if response.hovered() {
+                                    p.text(
+                                        cell.center(),
+                                        Align2::CENTER_CENTER,
+                                        "+",
+                                        FontId::proportional(16.0),
+                                        TEXT,
+                                    );
+                                }
+                                let response = response.on_hover_text(format!(
+                                    "{} → {}\n{} · 右键或双击调整",
+                                    name,
+                                    self.graph.channel_name(false, o),
+                                    if route.on { "已连接" } else { "未连接" }
+                                ));
+                                if response.secondary_clicked() || response.double_clicked() {
+                                    self.route = Some((i, o));
+                                } else if response.clicked() {
+                                    self.graph.routes[i][o].on = !route.on;
+                                    self.dirty = true;
+                                    self.audio_sync_pending = true;
+                                }
                             }
-                        });
-                });
+                        }
+                    });
             });
     }
     fn rack(&mut self, ui: &mut Ui) {
@@ -1619,10 +1717,10 @@ impl App {
                                 if button(ui,RichText::new("删除总线").color(COLORS[4]),false).on_hover_text("删除该组输入／输出及接线；至少保留一组兼容 DAW，最后一组可隐藏。").clicked() {self.card_action=Some(CardAction::RemoveBus(bus));}
                                 if ui.checkbox(&mut visible,"在面板中显示").changed() {for node in self.graph.inputs.iter_mut().chain(&mut self.graph.outputs) {if node.key.starts_with(&format!("virtual:{bus}:")) {node.visible=visible;}}self.dirty=true;}
                             });
-                            small(ui,"Windows 播放与 DAW 输出 → 同一输入卡片；输出卡片 → Windows 录音与 DAW 输入");
+                            small(ui,"Windows 播放与 DAW 输出 → 同一输入通道组；输出通道组 → Windows 录音与 DAW 输入");
                             for input in [true, false] {
                                 ui.horizontal(|ui| {
-                                    ui.label(format!("{}：{}", if input { "输入卡片" } else { "输出卡片" }, self.graph.virtual_name(input, bus)));
+                                    ui.label(format!("{}：{}", if input { "输入通道组" } else { "输出通道组" }, self.graph.virtual_name(input, bus)));
                                     if button(ui, "设置备注…", false).clicked() {
                                         let group = format!("virtual:{bus}");
                                         self.card_rename = Some(CardRename { input, draft: self.graph.card_name(input, &group).unwrap_or("").to_owned(), group, focus: true });
@@ -1641,7 +1739,7 @@ impl App {
             } else {
                 let input=self.channel_tab!=2;let system=self.channel_tab==3;
                 if !system && !self.hardware_available {ui.label("暂时无法读取所选声卡，请检查设备连接并在设置里刷新。");small(ui,&self.status);return;}
-                if system && !self.config.loopback {small(ui,"系统回录尚未启用，可在声卡设置中启用；显示卡片不会自动启用回录。");}
+                if system && !self.config.loopback {small(ui,"系统回录尚未启用，可在声卡设置中启用；显示通道组不会自动启用回录。");}
                 let display_names: std::collections::HashMap<String, String> = (if input {&self.graph.inputs} else {&self.graph.outputs}).iter().enumerate().map(|(i,n)|(n.key.clone(),self.graph.channel_name(input,i))).collect();
                 let nodes=if input {&mut self.graph.inputs} else {&mut self.graph.outputs};
                 let prefix=if system {"system:"} else {"hardware:"};
@@ -1907,7 +2005,7 @@ impl App {
         } else {
             "Soon Link Pro ASIO 未注册 · 注册后可在 64 位 DAW 中选择"
         });
-        small(ui,"ASIO 前面是物理通道，后面按创建数量追加虚拟通道。Windows 与 DAW 共用虚拟总线，每张卡片内的 L/R 可独立接线。");
+        small(ui,"ASIO 前面是物理通道，后面按创建数量追加虚拟通道。Windows 与 DAW 共用虚拟总线，每个通道组内的 L/R 可独立接线。");
         ui.horizontal(|ui| {
             if button(ui, "注册统一 ASIO…", true).clicked() {
                 if self.engine.is_some() || self.engine_busy || self.driver_tools.busy() {
@@ -1944,7 +2042,7 @@ impl App {
                 no + virtual_channels
             ));
         }
-        small(ui,"物理 ASIO 输入／输出直接转发真实声卡；硬件卡片的音量、静音以及全部静音同样作用于直通。");
+        small(ui,"物理 ASIO 输入／输出直接转发真实声卡；硬件通道组的音量、静音以及全部静音同样作用于直通。");
         small(
             ui,
             "先关闭 DAW 再注册。注册会将本软件旧的 Patchbay ASIO 迁移为新名称，需管理员确认。",
@@ -1954,7 +2052,7 @@ impl App {
         ui.label(RichText::new("Windows 播放／录音设备").strong());
         small(
             ui,
-            "卡片备注仅保存在本软件；Windows 设备名与 DAW 通道名不会随备注改变。",
+            "通道组备注仅保存在本软件；Windows 设备名与 DAW 通道名不会随备注改变。",
         );
         ui.add_enabled_ui(true, |ui| {
             if ui
@@ -2244,7 +2342,7 @@ impl App {
                             .color(COLORS[3]),
                     );
                 }
-                small(ui, "选择正在运行的应用；L/R 放在同一张卡片中，可分别接线。");
+                small(ui, "选择正在运行的应用；L/R 放在同一个通道组中，可分别接线。");
                 ui.add(Label::new(RichText::new(&self.app_audio_status).size(11.0).color(MUTED)).wrap());
                 ui.separator();
                 let filter = self.app_filter.to_lowercase();
@@ -2366,7 +2464,7 @@ impl App {
                     .show(ctx, |ui| {
                         ui.label(RichText::new(self.graph.channel_name(input, i)).strong());
                         small(ui, &format!("原始通道：{}", node.device_name));
-                        if button(ui, "设置卡片备注…", false).clicked() {
+                        if button(ui, "设置通道组备注…", false).clicked() {
                             self.open_card_rename(input, &Graph::card_group(&node.key));
                         }
                         ui.add_space(8.0);
@@ -2381,7 +2479,7 @@ impl App {
                         {
                             self.set_channel_fader(input, i, value);
                         }
-                        small(ui, "静音请用卡片标题栏的扬声器图标，一次控制整张卡片。");
+                        small(ui, "静音请用通道组标题栏的扬声器图标，一次控制整个通道组。");
                         small(ui, "需要独立调整时，解除 L/R 联动后拖动各声道电平条。");
                     });
             } else {
@@ -2395,16 +2493,18 @@ impl App {
             let mut open = true;
             let mut apply = false;
             let mut cancel = false;
-            ui_shell::dialog("卡片备注").open(&mut open).default_width(460.0).collapsible(false).show(ctx, |ui| {
-                small(ui, "整张卡片备注 · 留空显示原始名称");
+            ui_shell::dialog("通道组备注").open(&mut open).default_width(460.0).collapsible(false).show(ctx, |ui| {
+                small(ui, "整个通道组备注 · 留空显示原始名称");
                 let edit = ui.add(TextEdit::singleline(&mut rename.draft).char_limit(40).desired_width(f32::INFINITY).margin(Margin::symmetric(12, 9)));
                 if rename.focus { edit.request_focus(); rename.focus = false; }
                 apply |= edit.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
-                let base = if rename.draft.trim().is_empty() { "默认名称" } else { rename.draft.trim() };
-                let count = (if rename.input { &self.graph.inputs } else { &self.graph.outputs }).iter().filter(|n| Graph::card_group(&n.key) == rename.group).count();
-                ui.label(if count == 1 { format!("软件内显示：{base} · MONO") } else { format!("软件内显示：{base} · L  /  {base} · R") });
+                let original = self.channel_groups(rename.input, true).into_iter()
+                    .find(|group| group.group == rename.group).map(|group| group.original_title)
+                    .unwrap_or_else(|| "原始名称".into());
+                let preview = if rename.draft.trim().is_empty() { original } else { format!("{} ({})", original, rename.draft.trim()) };
+                ui.label(format!("软件内显示：{preview}"));
                 small(ui, "备注仅用于本软件显示；不修改 Windows、DAW、硬件或应用的原始名称，不重启音频。");
-                small(ui, "同组输入、输出卡片的备注各自保存，互不覆盖。");
+                small(ui, "同组输入、输出通道组的备注各自保存，互不覆盖。");
                 let nodes = if rename.input { &self.graph.inputs } else { &self.graph.outputs };
                 for node in nodes.iter().filter(|n| Graph::card_group(&n.key) == rename.group) { small(ui, &format!("原始通道：{}", node.device_name)); }
                 ui.add_space(8.0);
@@ -2418,7 +2518,7 @@ impl App {
                 self.graph
                     .set_card_name(rename.input, &rename.group, &rename.draft);
                 self.dirty = true;
-                self.status = "卡片备注已保存，仅改变软件内显示；音频继续运行。".into();
+                self.status = "通道组备注已保存，仅改变软件内显示；音频继续运行。".into();
             } else if open && !cancel {
                 self.card_rename = Some(rename);
             }

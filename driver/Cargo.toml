@@ -2,6 +2,7 @@
 name = "soon-link-pro-asio"
 version = "2.4.4-dev"
 edition = "2021"
+license = "MIT"
 [lib]
 name = "patchbay_asio"
 crate-type = ["cdylib"]

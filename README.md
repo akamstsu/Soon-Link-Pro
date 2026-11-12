@@ -1,17 +1,31 @@
 # Soon Link Pro
 
-Windows 音频路由工作台。版权方：挚彬Club；作者：赤松_Akamatsu。
+Windows 音频路由工作台，连接实体声卡、DAW、Windows 虚拟设备与应用声音。
 
-官网：https://www.zhibin.club
+版权方：挚彬Club；作者：赤松_Akamatsu。
 
 ## 功能
 
 - 一个 DAW ASIO 入口，前段转发所选物理声卡输入和输出，后段提供虚拟总线。
 - 每组虚拟总线提供 Windows 可识别的播放和录音设备；默认至少一组，可按需增加。
-- 跳线面板按声道接线，立体声卡片提供联动音量、整卡静音、显示选择和内部备注。
+- 跳线面板按声道接线，立体声通道组提供联动音量、整组静音、显示选择和内部备注，显示为 `原名 (备注)`。
+- 跳线面板显示流向和目标色渐变；紧凑路由矩阵按单声道交叉连接。
 - 应用声音采集、场景保存、DAW 启动时自动运行、托盘控制和宿主生命周期跟随。
 
-使用说明见 [WINDOWS_AUDIO.md](WINDOWS_AUDIO.md)。
+## 快速使用
+
+安装配套 x64 安装包，打开软件选择实体 ASIO 声卡，或使用 WASAPI。
+默认自动启动音频，保留至少一组虚拟输入与输出。按需要添加总线或应用，
+从左侧输入端口连接到右侧输出端口；同一来源可以连接多个目标。
+DAW 中选择 `Soon Link Pro ASIO`，其前段为物理声卡通道，后段为虚拟总线。
+
+电平条同时用于调音量，L/R 默认联动；扬声器图标控制整个通道组。
+点击组标题设置备注，输入和输出的备注独立，仅用于软件内显示。
+矩阵点击方格切换连接，右键或双击调整连接；悬停查看完整名称。
+关闭窗口收进托盘；退出请用托盘菜单。更新前保存并退出 DAW，再退出软件。
+
+详细使用与配置位置见 [WINDOWS_AUDIO.md](WINDOWS_AUDIO.md)。
+
 
 ## 环境
 
@@ -65,10 +79,23 @@ cargo build --locked --release --workspace
 | `installer` | Inno Setup 安装脚本及中文语言文件 |
 | `docs` | 接口资料与实现约定 |
 
-## 许可与验证状态
+## 许可证与第三方组件
 
 第三方组件的版权和许可见 [THIRD_PARTY_NOTICES.md](assets/THIRD_PARTY_NOTICES.md)、
 `assets/upstream-licenses` 和 `vendor/usbip-audio/LICENSE`。
-主项目发布许可证尚待版权方选择；第三方许可不自动授予主项目的许可。
+本项目许可证见 [LICENSE](LICENSE)。第三方组件继续遵循各自许可证；项目品牌与 Logo 不表示对衍生产品的背书。
+ASIO 是 Steinberg 的商标，Windows 是 Microsoft 的商标；名称仅用于接口说明。
+
+## 参与开发与自动构建
+
+请阅读 [CONTRIBUTING.md](CONTRIBUTING.md) 和 [AGENTS.md](AGENTS.md)。
+`main` 推送、PR 和手动运行会自动构建 Windows 安装包；匹配版本的 `v*` 标签
+会发布 GitHub Release。下载校验、产物和触发规则见
+[BUILD_AND_RELEASE.md](docs/BUILD_AND_RELEASE.md)。安装包及构建 artifact 不包含源码。
+本项目 EXE 和 ASIO DLL 尚未签名，随包 USB/IP 驱动保留原厂签名。
+
+## 当前状态
+
+当前为 `2.4.4-dev` 测试版。自动构建结果可在仓库 Actions 页面查看。
 
 编译完成不等于通过 DAW、安装、听音、延迟或 Live 验收。实际使用前需要在目标设备验证。
