@@ -2326,16 +2326,13 @@ impl App {
         ui_shell::dialog("添加应用输入")
             .open(&mut open)
             .default_size([580.0, 430.0])
+            .max_width((ctx.screen_rect().width() - 64.0).max(240.0))
             .collapsible(false)
             .show(ctx, |ui| {
                 ui_shell::intro(ui, "应用声音", "将正在运行的应用添加为独立的立体声来源。");
-                ui.horizontal(|ui| {
-                    widgets::search(ui, &mut self.app_filter, "搜索中文应用名或进程路径", (ui.available_width() - 112.0).max(160.0));
-                    if ui.button("刷新").clicked() {
-                        self.refresh_app_candidates();
-                    }
-                    if self.app_scan.is_some() { ui.spinner(); }
-                });
+                if widgets::search_with_refresh(ui, &mut self.app_filter, "搜索中文应用名或进程路径", self.app_scan.is_some()) {
+                    self.refresh_app_candidates();
+                }
                 if self.engine.is_some() {
                     ui.label(
                         RichText::new("添加或移除应用会自动更新音频布局，声音将短暂中断。")

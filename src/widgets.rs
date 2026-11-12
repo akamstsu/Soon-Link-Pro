@@ -269,6 +269,24 @@ pub fn search(ui: &mut Ui, value: &mut String, hint: &str, width: f32) -> Respon
     )
 }
 
+pub fn search_with_refresh(ui: &mut Ui, value: &mut String, hint: &str, loading: bool) -> bool {
+    // Lay out the controls first. TextEdit's desired width excludes its margins,
+    // so subtracting a fixed allowance from the row width can grow a Window every frame.
+    ui.allocate_ui_with_layout(
+        vec2(ui.available_width(), ui.spacing().interact_size.y),
+        Layout::right_to_left(Align::Center),
+        |ui| {
+            if loading {
+                ui.add(Spinner::new().size(18.0));
+            }
+            let refresh = ui.button("刷新").clicked();
+            search(ui, value, hint, f32::INFINITY);
+            refresh
+        },
+    )
+    .inner
+}
+
 pub fn text_button(ui: &mut Ui, label: impl Into<WidgetText>, active: bool) -> Response {
     sized_text_button(
         ui,
@@ -352,7 +370,11 @@ pub fn sized_text_button(
         }
         visuals.widgets.noninteractive.fg_stroke =
             Stroke::new(1.0, Color32::from_rgb(113, 123, 143));
-        ui.add(Button::new(label).corner_radius(7.0).min_size(size))
+        let mut button = Button::new(label).corner_radius(7.0).min_size(size);
+        if size.x > 0.0 {
+            button = button.truncate();
+        }
+        ui.add(button)
     })
     .inner
 }
@@ -421,4 +443,69 @@ pub fn metered_fader(
         "{label} · {}\n拖动电平条调整音量，双击恢复 0 dB；方向键微调。",
         bridge::fader_label(*value as f64)
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn application_picker_width_stays_stable_across_scan_updates() {
+        let ctx = Context::default();
+        let mut style = (*ctx.style()).clone();
+        crate::ui_shell::refine_style(&mut style);
+        ctx.set_style(style);
+        let mut filter = String::new();
+        let mut widths = Vec::new();
+        for frame in 0..96 {
+            let _ = ctx.run(
+                RawInput {
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(6000.0, 1000.0))),
+                    time: Some(frame as f64 / 60.0),
+                    ..Default::default()
+                },
+                |ctx| {
+                    let window = crate::ui_shell::dialog("添加应用输入")
+                        .default_size([580.0, 430.0])
+                        .collapsible(false)
+                        .show(ctx, |ui| {
+                            search_with_refresh(
+                                ui,
+                                &mut filter,
+                                "搜索中文应用名或进程路径",
+                                (8..64).contains(&frame),
+                            );
+                            ScrollArea::vertical().max_height(180.0).show(ui, |ui| {
+                                for row in 0..20 {
+                                    let label = if frame < 32 {
+                                        format!("Application {row}")
+                                    } else {
+                                        format!(
+                                            "{} {row} · 正在发声 · 已添加",
+                                            "Long application name ".repeat(12)
+                                        )
+                                    };
+                                    let width = ui.available_width();
+                                    let response = sized_text_button(
+                                        ui,
+                                        label,
+                                        false,
+                                        Color32::LIGHT_BLUE,
+                                        vec2(width, 48.0),
+                                    );
+                                    assert!(response.rect.width() <= width + 1.0);
+                                    assert!(response.rect.height() <= 49.0);
+                                }
+                            });
+                        })
+                        .unwrap();
+                    widths.push(window.response.rect.width());
+                },
+            );
+        }
+        let settled = &widths[4..];
+        let min = settled.iter().copied().fold(f32::INFINITY, f32::min);
+        let max = settled.iter().copied().fold(0.0, f32::max);
+        assert!(max - min <= 1.0, "popup width grew from {min} to {max}");
+    }
 }
