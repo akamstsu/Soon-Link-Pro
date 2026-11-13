@@ -335,6 +335,25 @@ pub fn search_with_refresh(ui: &mut Ui, value: &mut String, hint: &str, loading:
     .inner
 }
 
+pub fn application_picker_window(ctx: &Context) -> Window<'static> {
+    let screen = ctx.screen_rect();
+    let size = vec2(
+        (screen.width() - 72.0).clamp(180.0, 520.0),
+        (screen.height() - 160.0).clamp(80.0, 430.0),
+    );
+    crate::ui_shell::dialog("添加应用输入")
+        // A new ID discards oversized geometry remembered by older versions.
+        .id(Id::new((
+            "application_picker_compact_v2",
+            size.x.to_bits(),
+            size.y.to_bits(),
+        )))
+        .fixed_size(size)
+        .constrain_to(screen.shrink(12.0))
+        .vscroll(true)
+        .collapsible(false)
+}
+
 pub fn text_button(ui: &mut Ui, label: impl Into<WidgetText>, active: bool) -> Response {
     sized_text_button(
         ui,
@@ -496,6 +515,82 @@ pub fn metered_fader(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn application_picker_fits_small_and_scaled_viewports() {
+        for scale in [1.0, 1.25, 1.5, 2.0] {
+            let ctx = Context::default();
+            ctx.set_pixels_per_point(scale);
+            let mut style = (*ctx.style()).clone();
+            crate::ui_shell::refine_style(&mut style);
+            ctx.set_style(style);
+            let mut filter = String::new();
+            for frame in 0..48 {
+                let size = if frame < 16 {
+                    vec2(1920.0, 1080.0)
+                } else if frame < 32 {
+                    vec2(640.0, 480.0)
+                } else {
+                    vec2(420.0, 360.0)
+                };
+                let screen = Rect::from_min_size(Pos2::ZERO, size);
+                let _ = ctx.run(
+                    RawInput {
+                        screen_rect: Some(screen),
+                        time: Some(frame as f64 / 60.0),
+                        ..Default::default()
+                    },
+                    |ctx| {
+                        let window = application_picker_window(ctx)
+                            .show(ctx, |ui| {
+                                crate::ui_shell::intro(
+                                    ui,
+                                    "应用声音",
+                                    "将正在运行的应用添加为独立的立体声来源。",
+                                );
+                                search_with_refresh(
+                                    ui,
+                                    &mut filter,
+                                    "搜索中文应用名或进程路径",
+                                    frame % 2 == 0,
+                                );
+                                ui.add(Label::new("Very long scan status ".repeat(60)).truncate());
+                                ScrollArea::vertical()
+                                    .max_height(ui.available_height().min(330.0))
+                                    .show(ui, |ui| {
+                                        for row in 0..80 {
+                                            let width = ui.available_width();
+                                            sized_text_button(
+                                                ui,
+                                                format!(
+                                                    "{} {row}",
+                                                    "中文应用名称 Long application path "
+                                                        .repeat(12)
+                                                ),
+                                                false,
+                                                Color32::LIGHT_BLUE,
+                                                vec2(width, 48.0),
+                                            );
+                                        }
+                                    });
+                            })
+                            .unwrap();
+                        let rect = window.response.rect;
+                        assert!(
+                            rect.width() <= 562.0 && rect.width() <= screen.width() - 20.0,
+                            "scale {scale}, frame {frame}: {rect:?}, screen {:?}",
+                            ctx.screen_rect()
+                        );
+                        assert!(
+                            rect.height() <= screen.height(),
+                            "scale {scale}, frame {frame}: {rect:?}, screen {:?}",
+                            ctx.screen_rect()
+                        );
+                    },
+                );
+            }
+        }
+    }
 
     #[test]
     fn application_picker_width_stays_stable_across_scan_updates() {

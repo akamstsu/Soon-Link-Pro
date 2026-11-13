@@ -1,6 +1,6 @@
 [package]
 name = "soon-link-pro"
-version = "2.4.6-dev"
+version = "2.4.7-dev"
 edition = "2021"
 license = "MIT"
 default-run = "SoonLinkPro"
@@ -15,6 +15,7 @@ egui = "0.31"
 image = { version = "0.25", default-features = false, features = ["png"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+semver = "1"
 cpal = "0.15"
 winreg = "0.55"
 bridge = { path = "bridge" }

@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod about;
+mod app_updates;
 mod asio;
 mod audio;
 mod driver_tools;
@@ -542,7 +543,19 @@ impl App {
                         }
                     }
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if action(ui, Icon::Info, "关于与帮助", self.about.open).clicked() {
+                        let about_label = if self.about.updates.available() {
+                            "发现新版本"
+                        } else {
+                            "关于与帮助"
+                        };
+                        if action(
+                            ui,
+                            Icon::Info,
+                            about_label,
+                            self.about.open || self.about.updates.available(),
+                        )
+                        .clicked()
+                        {
                             self.about.open = true;
                         }
                         if action(ui, Icon::Settings, "设置", self.settings).clicked() {
@@ -2325,11 +2338,8 @@ impl App {
         let mut open = true;
         let mut chosen = None;
         let mut blocked = None;
-        ui_shell::dialog("添加应用输入")
+        widgets::application_picker_window(ctx)
             .open(&mut open)
-            .default_size([580.0, 430.0])
-            .max_width((ctx.screen_rect().width() - 64.0).max(240.0))
-            .collapsible(false)
             .show(ctx, |ui| {
                 ui_shell::intro(ui, "应用声音", "将正在运行的应用添加为独立的立体声来源。");
                 if widgets::search_with_refresh(ui, &mut self.app_filter, "搜索中文应用名或进程路径", self.app_scan.is_some()) {
@@ -2342,10 +2352,10 @@ impl App {
                     );
                 }
                 small(ui, "选择正在运行的应用；L/R 放在同一个通道组中，可分别接线。");
-                ui.add(Label::new(RichText::new(&self.app_audio_status).size(11.0).color(MUTED)).wrap());
+                ui.add(Label::new(RichText::new(&self.app_audio_status).size(11.0).color(MUTED)).truncate()).on_hover_text(&self.app_audio_status);
                 ui.separator();
                 let filter = self.app_filter.to_lowercase();
-                ScrollArea::vertical().max_height(330.0).show(ui, |ui| {
+                ScrollArea::vertical().max_height(ui.available_height().min(330.0)).show(ui, |ui| {
                     for target in &self.app_candidates {
                         if !target.exe.to_lowercase().contains(&filter) && !target.label().to_lowercase().contains(&filter) {
                             continue;
@@ -2543,6 +2553,9 @@ impl eframe::App for App {
             }
         }
         self.frames = self.frames.wrapping_add(1);
+        if self.screenshot.is_none() {
+            self.about.updates.poll(ctx);
+        }
         self.poll_engine();
         self.poll_driver_tools();
         if self.audio_sync_pending {

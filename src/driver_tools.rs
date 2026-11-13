@@ -52,7 +52,7 @@ impl Release {
         )
     }
 }
-fn shell(script: &str) -> Command {
+pub(crate) fn shell(script: &str) -> Command {
     let mut command = Command::new("powershell.exe");
     command
         .creation_flags(0x08000000)

@@ -31,6 +31,7 @@ cargo build --locked --release --workspace
 | `src/ui_shell.rs` | 主题、布局辅助、图标、连线与信号动效绘制 |
 | `src/widgets.rs` | 按钮、推子、电平等共用控件 |
 | `src/about.rs` | 关于窗口、项目与第三方组件信息 |
+| `src/app_updates.rs` | 后台版本检查、开发版安装包版本解析与更新提示 |
 | `src/audio.rs` | `Graph` / `Config`、配置迁移、路由计划、`Processor` 与 `Engine`、ASIO / WASAPI 流 |
 | `src/engine_control.rs` | 音频控制线程、启动/停止命令、异步事件与 revision 匹配 |
 | `src/asio.rs` | 物理 ASIO 设备枚举、COM 接口调用、缓冲和样本格式转换 |

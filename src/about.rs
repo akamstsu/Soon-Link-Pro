@@ -20,6 +20,7 @@ fn components() -> &'static [Component] {
 #[derive(Default)]
 pub struct About {
     pub open: bool,
+    pub updates: crate::app_updates::Updates,
     tab: usize,
     filter: String,
     selected: Option<usize>,
@@ -49,7 +50,7 @@ impl About {
         }
         let mut open = self.open;
         crate::ui_shell::dialog("关于与帮助 · Soon Link Pro").open(&mut open).default_width(690.0).collapsible(false).show(ctx, |ui| {
-            crate::ui_shell::intro(ui, "Soon Link Pro", "R2.4.6-dev · Windows 音频路由工作台");
+            crate::ui_shell::intro(ui, "Soon Link Pro", concat!("R", env!("CARGO_PKG_VERSION"), " · Windows 音频路由工作台"));
             ui.horizontal(|ui| {
                 for (index, (icon, label)) in [(crate::widgets::Icon::Info, "关于"), (crate::widgets::Icon::Help, "使用指南"), (crate::widgets::Icon::More, "开源组件与版权")].iter().enumerate() {
                     if crate::widgets::action(ui, *icon, label, self.tab == index).clicked() { self.tab = index; }
@@ -57,6 +58,8 @@ impl About {
             });
             ui.add_space(12.0);
             if self.tab == 0 {
+                self.updates.show(ui);
+                ui.add_space(10.0);
                 crate::ui_shell::section().show(ui, |ui| {
                     ui.set_min_width(ui.available_width());
                     ui.horizontal(|ui| {

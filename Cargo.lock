@@ -1765,33 +1765,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "soon-link-pro"
-version = "2.4.6-dev"
-dependencies = [
- "bridge",
- "cpal",
- "eframe",
- "egui",
- "image",
- "raw-window-handle",
- "serde",
- "serde_json",
- "usbip-audio",
- "windows 0.54.0",
- "windows-sys 0.61.2",
- "winreg",
-]
-
-[[package]]
-name = "soon-link-pro-asio"
-version = "2.4.6-dev"
-dependencies = [
- "bridge",
- "windows-sys 0.61.2",
- "winreg",
-]
-
-[[package]]
 name = "percent-encoding"
 version = "2.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2222,6 +2195,34 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dd538fb6910ac1099850255cf94a94df6551fbdd602454387d0adb2d1ca6dead"
 dependencies = [
  "serde",
+]
+
+[[package]]
+name = "soon-link-pro"
+version = "2.4.7-dev"
+dependencies = [
+ "bridge",
+ "cpal",
+ "eframe",
+ "egui",
+ "image",
+ "raw-window-handle",
+ "semver",
+ "serde",
+ "serde_json",
+ "usbip-audio",
+ "windows 0.54.0",
+ "windows-sys 0.61.2",
+ "winreg",
+]
+
+[[package]]
+name = "soon-link-pro-asio"
+version = "2.4.7-dev"
+dependencies = [
+ "bridge",
+ "windows-sys 0.61.2",
+ "winreg",
 ]
 
 [[package]]
