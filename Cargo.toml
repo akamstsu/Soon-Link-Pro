@@ -1,6 +1,6 @@
 [package]
 name = "soon-link-pro"
-version = "2.4.5-dev"
+version = "2.4.6-dev"
 edition = "2021"
 license = "MIT"
 default-run = "SoonLinkPro"

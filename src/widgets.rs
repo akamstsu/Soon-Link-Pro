@@ -4,6 +4,7 @@ use eframe::egui::*;
 pub enum Icon {
     Routes,
     Matrix,
+    Channels,
     Settings,
     More,
     Volume,
@@ -83,6 +84,13 @@ pub fn draw_icon(p: &Painter, rect: Rect, icon: Icon, color: Color32) {
                 }
             }
         }
+        Icon::Channels => {
+            for (y, knob_x) in [(-6.0, -3.0), (0.0, 4.0), (6.0, -1.0)] {
+                line((-8.0, y), (knob_x - 2.0, y));
+                line((knob_x + 2.0, y), (8.0, y));
+                p.circle_stroke(at(knob_x, y), s / 12.0, stroke);
+            }
+        }
         Icon::Settings => {
             p.circle_stroke(c, s * 0.25, stroke);
             p.circle_stroke(c, s * 0.09, stroke);
@@ -155,6 +163,46 @@ pub fn draw_icon(p: &Painter, rect: Rect, icon: Icon, color: Color32) {
             p.circle_filled(at(0.0, 6.0), s * 0.04, color);
         }
     }
+}
+
+pub enum StatusIndicator {
+    Idle,
+    Active,
+    Busy,
+}
+
+pub fn status_label(
+    ui: &mut Ui,
+    indicator: StatusIndicator,
+    label: &str,
+    color: Color32,
+) -> Response {
+    let galley = ui
+        .painter()
+        .layout_no_wrap(label.into(), FontId::proportional(12.0), color);
+    let (rect, response) =
+        ui.allocate_exact_size(vec2(20.0 + galley.size().x, 18.0), Sense::hover());
+    let icon_rect =
+        Rect::from_center_size(pos2(rect.left() + 7.0, rect.center().y), vec2(14.0, 14.0));
+    match indicator {
+        StatusIndicator::Busy => {
+            Spinner::new().color(color).paint_at(ui, icon_rect);
+        }
+        StatusIndicator::Active => {
+            ui.painter().circle_filled(icon_rect.center(), 3.5, color);
+        }
+        StatusIndicator::Idle => {
+            ui.painter()
+                .circle_stroke(icon_rect.center(), 3.5, Stroke::new(1.3, color));
+        }
+    }
+    ui.painter().galley(
+        pos2(rect.left() + 20.0, rect.center().y - galley.size().y * 0.5),
+        galley,
+        color,
+    );
+    response.widget_info(|| WidgetInfo::labeled(WidgetType::Label, ui.is_enabled(), label));
+    response
 }
 
 pub fn icon_at(

@@ -567,20 +567,18 @@ impl App {
                         {
                             self.start_stop();
                         }
-                        ui.label(
-                            RichText::new(if self.engine_busy {
-                                "◌  自动更新中"
-                            } else if live {
-                                "●  引擎运行中"
-                            } else {
-                                "○  引擎待机"
-                            })
-                            .size(12.0)
-                            .color(if live {
-                                COLORS[0]
-                            } else {
-                                MUTED
-                            }),
+                        let (indicator, label) = if self.engine_busy {
+                            (widgets::StatusIndicator::Busy, "自动更新中")
+                        } else if live {
+                            (widgets::StatusIndicator::Active, "引擎运行中")
+                        } else {
+                            (widgets::StatusIndicator::Idle, "引擎待机")
+                        };
+                        widgets::status_label(
+                            ui,
+                            indicator,
+                            label,
+                            if live { COLORS[0] } else { MUTED },
                         );
                     });
                 });
@@ -989,7 +987,7 @@ impl App {
                 .count();
             small(ui, &format!("{} 个显示通道", visible));
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if button(ui, "通道管理", false)
+                if action(ui, Icon::Channels, "通道管理", false)
                     .on_hover_text("按实际设备名称选择显示或隐藏，不改变已有接线")
                     .clicked()
                 {
@@ -1291,6 +1289,10 @@ impl App {
         menu_ui.spacing_mut().interact_size = vec2(26.0, 24.0);
         menu_ui.spacing_mut().button_padding = vec2(5.0, 2.0);
         menu_ui.menu_button(RichText::new("···").size(18.0), |ui| {
+            // egui resets popup padding to (2, 0); restore it inside the menu.
+            ui.spacing_mut().button_padding = vec2(12.0, 6.0);
+            ui.spacing_mut().interact_size.y = 32.0;
+            ui.spacing_mut().item_spacing.y = 4.0;
             ui.label(RichText::new(&card.title).size(12.0).color(MUTED));
             if ui.button("设置通道组备注…").clicked() {
                 self.open_card_rename(input, &card.group);
