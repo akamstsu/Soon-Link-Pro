@@ -153,7 +153,8 @@ cargo build --locked --release --workspace
 更新安装保留现有用户配置，已有配置优先于可选导入文件；卸载逻辑不递归删除用户数据。
 
 `main` 推送通过测试与构建后，为尚未发布的新版本创建严格匹配根包版本的 `v<version>`
-标签和独立 Release；带 `-dev` 等后缀时标记为 prerelease，仍按版本逐条显示并保留历史。
+标签和独立 Release。版本可保留 `-dev`，但 GitHub 发布不设为 prerelease，而是设为 Latest，
+以便仓库首页 Releases 直接展示最新版本；这不代表软件已完成真实设备验收。
 不使用固定 `dev` 标签或滚动覆盖。相同版本再次推送仅生成 artifact，不移动标签或替换旧附件。
 PR 和手动触发只产生测试 artifact。更新功能读取 Releases 列表，包含开发版，并核对标签和安装包版本。
 发布前核对根包、driver、关于页和更新说明中的版本。已有发布失败时可重跑原提交的工作流完成发布。

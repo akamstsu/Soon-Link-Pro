@@ -133,6 +133,7 @@ jobs:
             printf 'Version: `%s` · Commit: `%s`\n\n' "$APP_VERSION" "$GITHUB_SHA"
             awk '/^# / { if (seen++) exit; next } { print }' docs/RELEASE_NOTES.md
           } > "$notes"
-          args=(--verify-tag --title "Soon Link Pro $APP_VERSION" --notes-file "$notes")
-          if [[ "$APP_VERSION" == *-* ]]; then args+=(--prerelease); fi
+          # Keep -dev in the version, but publish normally so GitHub's repository
+          # sidebar displays the latest release instead of only a tag count.
+          args=(--verify-tag --latest --title "Soon Link Pro $APP_VERSION" --notes-file "$notes")
           gh release create "$RELEASE_TAG" dist/* "${args[@]}"

@@ -91,7 +91,8 @@ ASIO 是 Steinberg 的商标，Windows 是 Microsoft 的商标；名称仅用于
 
 请阅读 [CONTRIBUTING.md](CONTRIBUTING.md) 和 [AGENTS.md](AGENTS.md)。
 推送 `main` 后，测试与构建通过就会为新版本自动创建 `v<版本号>` 标签和独立 Release。
-开发版保留 `-dev` 后缀并标记为预发布；各版本与安装包分别保留，不覆盖历史发布。
+开发版保留 `-dev` 后缀；GitHub 发布设为 Latest，让首页 Releases 直接显示最新版本。
+各版本与安装包分别保留，不覆盖历史发布。
 相同版本号再次推送只生成测试安装包；PR 和手动运行也只构建测试包。
 下载校验、产物和触发规则见
 [BUILD_AND_RELEASE.md](docs/BUILD_AND_RELEASE.md)。安装包及构建 artifact 不包含源码。
