@@ -4,11 +4,10 @@
 
 | 触发方式 | 行为 |
 | --- | --- |
-| 推送 `main` | 检查、测试、构建成功后自动更新 `dev` 标签和开发版 Release |
+| 推送 `main` | 检查、测试、构建成功后为新版本创建独立标签和 Release |
 | 向 `main` 提 PR | 格式检查、工作区测试、发布模式构建、生成测试安装包 |
 | Actions 页面手动运行 | 同样生成安装包，不创建 Release |
-| 更新固定 `dev` 标签 | 构建成功后更新同一个开发版 Release，替换安装包和 SHA256 |
-| 推送正式版 `v<版本号>` 标签 | 构建成功后创建对应正式版 Release |
+| 推送 `v<版本号>` 标签 | 构建成功后创建对应版本的 Release |
 
 普通构建在 Actions 的 `Soon-Link-Pro-Windows-x64` artifact 中保留 30 天。
 只有发布任务获得仓库写入权限，PR 构建只读，无需额外访问令牌或签名密钥。
@@ -22,26 +21,18 @@ Windows Server 2022 runner 使用 Rust stable MSVC；构建时记录 Rust 版本
 应用及本项目 ASIO DLL 尚无代码签名，原厂驱动签名保持原样。
 
 版本来自根目录 Cargo.toml；安装器的数字版本由其去掉预发布后缀得到。
-开发版根包保留 `-dev` 后缀，统一使用固定的 `dev` 标签和 prerelease；Release 标题、
-安装包文件名与更新说明包含实际版本号。每次更新先上传新附件，再移除旧版本安装包，
-开发版下载页固定为仓库的 `releases/tag/dev`，不再创建 `v<版本号>-dev` 标签。
-正式版标签必须严格等于 `v` 加根包版本，版本中不能带预发布后缀；已发布的正式版标签保持不变。
-发布前同步主程序、`driver/Cargo.toml`、关于页和更新说明中的显示版本。
+每个版本使用严格匹配根包版本的 `v<版本号>` 标签，并在 Releases 中独立显示、保留历史安装包。
+带 `-dev` 等后缀的版本标记为 prerelease；没有后缀的正式版正常发布。不使用固定 `dev` 发布项。
 
-日常发布只需推送 `main`，根包版本须保留 `-dev` 后缀。CI 先完成测试与安装包构建，
-再使用定向 lease 移动 `dev` 标签并发布；CI 使用自带令牌推送标签，不会再次触发标签构建。
-本地 commit 不触发发布，推送 `main` 才触发；需要先审阅或先测试时，应在推送前完成。
-需要手动将 `dev` 指向已确认的提交时，先获取远端旧值，避免覆盖他人的发布：
+日常发布先增加版本号，再推送 `main`。CI 先测试与构建，再创建该版本的新标签和 Release；
+CI 使用自带令牌创建标签，不会再次触发标签构建。已存在的标签不移动、附件不覆盖。
+相同版本再次推送仅生成测试 artifact；若同一提交的发布失败，可重跑工作流恢复。
+本地 commit 不触发发布，推送才触发；需要先审阅或先测试时，应在推送前完成。
+PR 和 Actions 页面手动构建只产生测试 artifact。
 
-```powershell
-$devRef = git ls-remote origin refs/tags/dev
-if ($LASTEXITCODE -ne 0 -or -not $devRef) { throw 'Cannot read the existing dev tag.' }
-$previousDev = ($devRef -split '\s+')[0]
-git tag -f dev HEAD
-git push "--force-with-lease=refs/tags/dev:$previousDev" origin refs/tags/dev
-```
-
-手动移动标签也会触发构建与发布；Actions 页面手动构建仍只产生测试 artifact。
+发布前同步主程序、`driver/Cargo.toml`、关于页和更新说明中的版本。
+软件更新检测读取 Releases 列表，按语义版本排序，包含开发版；只采用标签版本一致且已上传的安装包。
+旧 `2.4.7-dev` 使用已停用的固定 `dev` 检测地址，需要手动升级一次到 `2.4.8-dev` 或更高版本。
 
 ## 本地复现
 

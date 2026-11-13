@@ -3,8 +3,8 @@ use semver::Version;
 use serde::Deserialize;
 use std::sync::mpsc::{self, Receiver, TryRecvError};
 
-pub const RELEASE_URL: &str = "https://github.com/akamstsu/Soon-Link-Pro/releases/tag/dev";
-const API_URL: &str = "https://api.github.com/repos/akamstsu/Soon-Link-Pro/releases/tags/dev";
+pub const RELEASE_URL: &str = "https://github.com/akamstsu/Soon-Link-Pro/releases";
+const API_URL: &str = "https://api.github.com/repos/akamstsu/Soon-Link-Pro/releases?per_page=100";
 pub const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[derive(Deserialize)]
@@ -21,22 +21,23 @@ struct Asset {
 }
 
 fn published_version(bytes: &[u8]) -> Result<Version, String> {
-    let release: Release =
+    let releases: Vec<Release> =
         serde_json::from_slice(bytes).map_err(|_| "更新信息格式不正确，请稍后重试。".to_owned())?;
-    if release.draft || release.tag_name != "dev" {
-        return Err("未找到可用的开发版发布。".into());
-    }
-    release
-        .assets
+    releases
         .iter()
-        .filter(|asset| asset.state == "uploaded" && asset.size > 0)
-        .filter_map(|asset| {
-            asset
-                .name
-                .strip_prefix("Soon-Link-Pro-R")?
-                .strip_suffix("-Setup-x64.exe")?
+        .filter(|release| !release.draft)
+        .filter_map(|release| {
+            let version = release
+                .tag_name
+                .strip_prefix('v')?
                 .parse::<Version>()
-                .ok()
+                .ok()?;
+            let filename = format!("Soon-Link-Pro-R{version}-Setup-x64.exe");
+            release
+                .assets
+                .iter()
+                .any(|asset| asset.name == filename && asset.state == "uploaded" && asset.size > 0)
+                .then_some(version)
         })
         .max()
         .ok_or_else(|| "新版安装包尚未就绪，请稍后重试。".into())
@@ -148,18 +149,21 @@ impl Updates {
 mod tests {
     use super::*;
     fn payload(assets: serde_json::Value) -> Vec<u8> {
-        serde_json::to_vec(&serde_json::json!({"tag_name":"dev","draft":false,"assets":assets}))
-            .unwrap()
+        serde_json::to_vec(
+            &serde_json::json!([{ "tag_name":"v2.4.10-dev","draft":false,"assets":assets }]),
+        )
+        .unwrap()
     }
     fn installer(version: &str) -> serde_json::Value {
         serde_json::json!({"name":format!("Soon-Link-Pro-R{version}-Setup-x64.exe"),"state":"uploaded","size":100})
     }
     #[test]
-    fn rolling_tag_uses_installer_version_and_semver_order() {
-        let data = payload(serde_json::json!([
-            installer("2.4.9-dev"),
-            installer("2.4.10-dev")
-        ]));
+    fn versioned_releases_use_semver_order_instead_of_list_order() {
+        let data = serde_json::to_vec(&serde_json::json!([
+            {"tag_name":"v2.4.9-dev","draft":false,"assets":[installer("2.4.9-dev")]},
+            {"tag_name":"v2.4.10-dev","draft":false,"assets":[installer("2.4.10-dev")]}
+        ]))
+        .unwrap();
         assert_eq!(
             published_version(&data).unwrap(),
             Version::parse("2.4.10-dev").unwrap()
@@ -181,8 +185,8 @@ mod tests {
     }
     #[test]
     fn draft_and_wrong_tags_are_rejected() {
-        for (draft, tag) in [(true, "dev"), (false, "other")] {
-            let bytes = serde_json::to_vec(&serde_json::json!({"draft":draft,"tag_name":tag,"assets":[installer("9.0.0-dev")]})).unwrap();
+        for (draft, tag) in [(true, "v9.0.0-dev"), (false, "dev"), (false, "v8.0.0-dev")] {
+            let bytes = serde_json::to_vec(&serde_json::json!([{"draft":draft,"tag_name":tag,"assets":[installer("9.0.0-dev")]}])).unwrap();
             assert!(published_version(&bytes).is_err());
         }
     }

@@ -90,14 +90,15 @@ ASIO 是 Steinberg 的商标，Windows 是 Microsoft 的商标；名称仅用于
 ## 参与开发与自动构建
 
 请阅读 [CONTRIBUTING.md](CONTRIBUTING.md) 和 [AGENTS.md](AGENTS.md)。
-推送 `main` 后，测试与构建通过就会自动更新固定 `dev` 标签及同一个开发版 Release，
-安装包保留实际版本号。PR 和手动运行只生成测试安装包；正式版使用 `v<版本号>` 标签。
+推送 `main` 后，测试与构建通过就会为新版本自动创建 `v<版本号>` 标签和独立 Release。
+开发版保留 `-dev` 后缀并标记为预发布；各版本与安装包分别保留，不覆盖历史发布。
+相同版本号再次推送只生成测试安装包；PR 和手动运行也只构建测试包。
 下载校验、产物和触发规则见
 [BUILD_AND_RELEASE.md](docs/BUILD_AND_RELEASE.md)。安装包及构建 artifact 不包含源码。
 本项目 EXE 和 ASIO DLL 尚未签名，随包 USB/IP 驱动保留原厂签名。
 
 ## 当前状态
 
-当前为 `2.4.7-dev` 测试版。自动构建结果可在仓库 Actions 页面查看。
+当前为 `2.4.8-dev` 测试版。自动构建结果可在仓库 Actions 页面查看。
 
 编译完成不等于通过 DAW、安装、听音、延迟或 Live 验收。实际使用前需要在目标设备验证。

@@ -3,7 +3,7 @@ name: Windows installer
 on:
   push:
     branches: [main]
-    tags: ['dev', 'v*']
+    tags: ['v*']
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -13,7 +13,7 @@ permissions:
 
 concurrency:
   group: windows-${{ github.ref }}
-  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   build:
@@ -40,12 +40,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Cargo metadata failed.' }
           $version = ($metadata.packages | Where-Object name -eq 'soon-link-pro').version
           "version=$version" >> $env:GITHUB_OUTPUT
-          if ($env:GITHUB_REF -eq 'refs/tags/dev') {
-            if ($version -notmatch '-dev$') { throw 'The rolling dev tag requires a -dev package version.' }
-          } elseif ($env:GITHUB_REF.StartsWith('refs/tags/')) {
-            if ($env:GITHUB_REF_NAME -cne "v$version" -or $version.Contains('-')) {
-              throw 'Stable release tags must match a stable Cargo.toml version; development builds use dev.'
-            }
+          if ($env:GITHUB_REF.StartsWith('refs/tags/') -and $env:GITHUB_REF_NAME -cne "v$version") {
+            throw 'Release tag must match Cargo.toml version.'
           }
       - name: Format and tests
         run: |
@@ -94,52 +90,49 @@ jobs:
         with:
           name: Soon-Link-Pro-Windows-x64
           path: dist
-      - name: Update rolling dev tag after a main build
-        if: github.ref == 'refs/heads/main'
+      - name: Prepare versioned release tag
+        id: release_tag
         env:
           GH_TOKEN: ${{ github.token }}
           APP_VERSION: ${{ needs.build.outputs.version }}
         shell: bash
         run: |
           set -euo pipefail
-          if [[ "$APP_VERSION" != *-dev ]]; then
-            echo 'Automatic dev publishing requires a -dev package version.' >&2
-            exit 1
+          tag="v$APP_VERSION"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          if [[ "$GITHUB_REF" == refs/heads/main ]]; then
+            gh auth setup-git
+            existing=$(git ls-remote origin "refs/tags/$tag" "refs/tags/$tag^{}" | awk 'END {print $1}')
+            if [[ -n "$existing" && "$existing" != "$GITHUB_SHA" ]]; then
+              echo 'This version is already tagged; retain its release and publish only build artifacts.'
+              echo 'publish=false' >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            if [[ -z "$existing" ]]; then
+              git tag "$tag" "$GITHUB_SHA"
+              git push origin "refs/tags/$tag"
+            fi
           fi
-          gh auth setup-git
-          previous=$(git ls-remote origin refs/tags/dev | cut -f1)
-          git tag -f dev "$GITHUB_SHA"
-          git push "--force-with-lease=refs/tags/dev:$previous" origin refs/tags/dev
-      - name: Publish tagged installer
+          echo 'publish=true' >> "$GITHUB_OUTPUT"
+      - name: Publish versioned installer
+        if: steps.release_tag.outputs.publish == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          RELEASE_TAG: ${{ github.ref == 'refs/heads/main' && 'dev' || github.ref_name }}
+          RELEASE_TAG: ${{ steps.release_tag.outputs.tag }}
           APP_VERSION: ${{ needs.build.outputs.version }}
         shell: bash
         run: |
           set -euo pipefail
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo 'Release already exists; preserve its notes and assets.'
+            exit 0
+          fi
           notes="$RUNNER_TEMP/release-notes.md"
           {
             printf 'Version: `%s` · Commit: `%s`\n\n' "$APP_VERSION" "$GITHUB_SHA"
             awk '/^# / { if (seen++) exit; next } { print }' docs/RELEASE_NOTES.md
           } > "$notes"
-          title="Soon Link Pro $APP_VERSION"
-          if [[ "$RELEASE_TAG" == dev ]]; then title="Soon Link Pro dev · $APP_VERSION"; fi
-          args=(--title "$title" --notes-file "$notes")
-          if [[ "$RELEASE_TAG" == dev ]]; then args+=(--prerelease --latest=false); fi
-          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            gh release upload "$RELEASE_TAG" dist/* --clobber
-            gh release edit "$RELEASE_TAG" "${args[@]}"
-            if [[ "$RELEASE_TAG" == dev ]]; then
-              # Upload the replacement first, then remove obsolete versioned installers.
-              gh release view dev --json assets --jq '.assets[].name' > "$RUNNER_TEMP/dev-assets.txt"
-              while IFS= read -r asset; do
-                if [[ "$asset" == Soon-Link-Pro-*-Setup-x64.exe && ! -f "dist/$asset" ]]; then
-                  gh release delete-asset dev "$asset" --yes
-                fi
-              done < "$RUNNER_TEMP/dev-assets.txt"
-            fi
-          else
-            gh release create "$RELEASE_TAG" dist/* --verify-tag "${args[@]}"
-          fi
+          args=(--verify-tag --title "Soon Link Pro $APP_VERSION" --notes-file "$notes")
+          if [[ "$APP_VERSION" == *-* ]]; then args+=(--prerelease); fi
+          gh release create "$RELEASE_TAG" dist/* "${args[@]}"

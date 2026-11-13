@@ -1,6 +1,6 @@
 [package]
 name = "soon-link-pro-asio"
-version = "2.4.7-dev"
+version = "2.4.8-dev"
 edition = "2021"
 license = "MIT"
 [lib]
