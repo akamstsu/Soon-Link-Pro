@@ -6,7 +6,8 @@
 | --- | --- |
 | 推送 `main`、向 `main` 提 PR | 格式检查、工作区测试、发布模式构建、生成安装包 |
 | Actions 页面手动运行 | 同样生成安装包，不创建 Release |
-| 推送 `v<版本号>` 标签 | 构建成功后上传安装包和 SHA256 到 GitHub Release |
+| 更新固定 `dev` 标签 | 构建成功后更新同一个开发版 Release，替换安装包和 SHA256 |
+| 推送正式版 `v<版本号>` 标签 | 构建成功后创建对应正式版 Release |
 
 普通构建在 Actions 的 `Soon-Link-Pro-Windows-x64` artifact 中保留 30 天。
 只有标签发布任务获得仓库写入权限，PR 构建只读，无需额外访问令牌或签名密钥。
@@ -20,8 +21,24 @@ Windows Server 2022 runner 使用 Rust stable MSVC；构建时记录 Rust 版本
 应用及本项目 ASIO DLL 尚无代码签名，原厂驱动签名保持原样。
 
 版本来自根目录 Cargo.toml；安装器的数字版本由其去掉预发布后缀得到。
-标签必须严格等于 `v` 加根包版本。带 `-dev` 等后缀的版本标记为 prerelease。
+开发版根包保留 `-dev` 后缀，统一使用固定的 `dev` 标签和 prerelease；Release 标题、
+安装包文件名与更新说明包含实际版本号。每次更新先上传新附件，再移除旧版本安装包，
+开发版下载页固定为仓库的 `releases/tag/dev`，不再创建 `v<版本号>-dev` 标签。
+正式版标签必须严格等于 `v` 加根包版本，版本中不能带预发布后缀；已发布的正式版标签保持不变。
 发布前同步主程序、`driver/Cargo.toml`、关于页和更新说明中的显示版本。
+
+维护者确认测试包后，首次发布开发版可执行 `git tag dev`、`git push origin refs/tags/dev`。
+以后更新时先获取远端旧值并使用定向 lease，防止覆盖他人的发布：
+
+```powershell
+$devRef = git ls-remote origin refs/tags/dev
+if ($LASTEXITCODE -ne 0 -or -not $devRef) { throw 'Cannot read the existing dev tag.' }
+$previousDev = ($devRef -split '\s+')[0]
+git tag -f dev HEAD
+git push "--force-with-lease=refs/tags/dev:$previousDev" origin refs/tags/dev
+```
+
+移动标签触发构建与发布；仅推送 `main` 或手动构建仍只产生测试 artifact。
 
 ## 本地复现
 
