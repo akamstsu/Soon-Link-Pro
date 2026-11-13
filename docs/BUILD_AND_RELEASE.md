@@ -4,13 +4,14 @@
 
 | 触发方式 | 行为 |
 | --- | --- |
-| 推送 `main`、向 `main` 提 PR | 格式检查、工作区测试、发布模式构建、生成安装包 |
+| 推送 `main` | 检查、测试、构建成功后自动更新 `dev` 标签和开发版 Release |
+| 向 `main` 提 PR | 格式检查、工作区测试、发布模式构建、生成测试安装包 |
 | Actions 页面手动运行 | 同样生成安装包，不创建 Release |
 | 更新固定 `dev` 标签 | 构建成功后更新同一个开发版 Release，替换安装包和 SHA256 |
 | 推送正式版 `v<版本号>` 标签 | 构建成功后创建对应正式版 Release |
 
 普通构建在 Actions 的 `Soon-Link-Pro-Windows-x64` artifact 中保留 30 天。
-只有标签发布任务获得仓库写入权限，PR 构建只读，无需额外访问令牌或签名密钥。
+只有发布任务获得仓库写入权限，PR 构建只读，无需额外访问令牌或签名密钥。
 Action 引用固定到 commit，下载工具固定版本与 SHA256，Cargo 使用锁文件。
 
 ## 工具和版本
@@ -27,8 +28,10 @@ Windows Server 2022 runner 使用 Rust stable MSVC；构建时记录 Rust 版本
 正式版标签必须严格等于 `v` 加根包版本，版本中不能带预发布后缀；已发布的正式版标签保持不变。
 发布前同步主程序、`driver/Cargo.toml`、关于页和更新说明中的显示版本。
 
-维护者确认测试包后，首次发布开发版可执行 `git tag dev`、`git push origin refs/tags/dev`。
-以后更新时先获取远端旧值并使用定向 lease，防止覆盖他人的发布：
+日常发布只需推送 `main`，根包版本须保留 `-dev` 后缀。CI 先完成测试与安装包构建，
+再使用定向 lease 移动 `dev` 标签并发布；CI 使用自带令牌推送标签，不会再次触发标签构建。
+本地 commit 不触发发布，推送 `main` 才触发；需要先审阅或先测试时，应在推送前完成。
+需要手动将 `dev` 指向已确认的提交时，先获取远端旧值，避免覆盖他人的发布：
 
 ```powershell
 $devRef = git ls-remote origin refs/tags/dev
@@ -38,7 +41,7 @@ git tag -f dev HEAD
 git push "--force-with-lease=refs/tags/dev:$previousDev" origin refs/tags/dev
 ```
 
-移动标签触发构建与发布；仅推送 `main` 或手动构建仍只产生测试 artifact。
+手动移动标签也会触发构建与发布；Actions 页面手动构建仍只产生测试 artifact。
 
 ## 本地复现
 
