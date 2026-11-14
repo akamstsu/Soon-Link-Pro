@@ -527,21 +527,55 @@ mod tests {
                 ),
                 ERROR_SUCCESS
             );
-            let mut text = std::ptr::null_mut();
+            // SDDL output uses aliases such as LA on the hosted administrator
+            // account. Compare the actual ACL and binary SID, not display text.
+            let expected_sddl: Vec<u16> =
+                user_sddl().unwrap().encode_utf16().chain(Some(0)).collect();
+            let mut expected = std::ptr::null_mut();
             assert_ne!(
-                ConvertSecurityDescriptorToStringSecurityDescriptorW(
-                    descriptor,
+                ConvertStringSecurityDescriptorToSecurityDescriptorW(
+                    expected_sddl.as_ptr(),
                     SDDL_REVISION_1,
-                    DACL_SECURITY_INFORMATION,
-                    &mut text,
+                    &mut expected,
                     std::ptr::null_mut()
                 ),
                 0
             );
-            let actual = windows::core::PWSTR(text).to_string().unwrap();
-            LocalFree(text.cast());
+            let mut control = 0;
+            let mut revision = 0;
+            assert_ne!(
+                GetSecurityDescriptorControl(descriptor, &mut control, &mut revision),
+                0
+            );
+            assert_ne!(control & SE_DACL_PROTECTED, 0);
+            let mut aces = Vec::new();
+            for sd in [descriptor, expected] {
+                let mut acl = std::ptr::null_mut();
+                let mut present = 0;
+                let mut defaulted = 0;
+                assert_ne!(
+                    GetSecurityDescriptorDacl(sd, &mut present, &mut acl, &mut defaulted),
+                    0
+                );
+                assert_ne!(present, 0);
+                assert!(!acl.is_null());
+                assert_eq!((*acl).AceCount, 1);
+                let mut ace = std::ptr::null_mut();
+                assert_ne!(GetAce(acl, 0, &mut ace), 0);
+                aces.push(ace.cast::<ACCESS_ALLOWED_ACE>());
+            }
+            assert_eq!((*aces[0]).Header.AceType, (*aces[1]).Header.AceType);
+            assert_eq!((*aces[0]).Header.AceFlags, (*aces[1]).Header.AceFlags);
+            assert_eq!((*aces[0]).Mask, (*aces[1]).Mask);
+            assert_ne!(
+                EqualSid(
+                    std::ptr::addr_of_mut!((*aces[0]).SidStart).cast(),
+                    std::ptr::addr_of_mut!((*aces[1]).SidStart).cast()
+                ),
+                0
+            );
+            LocalFree(expected);
             LocalFree(descriptor);
-            assert_eq!(actual, user_sddl().unwrap());
         }
         std::fs::remove_file(path).unwrap();
     }
