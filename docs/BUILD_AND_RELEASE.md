@@ -48,7 +48,8 @@ PR 和 Actions 页面手动构建只产生测试 artifact。
   -DriverInstaller '.\build\tools\usbip-win2-0.9.8.1-x64.exe'
 ```
 
-产物在 `dist`；`build/payload` 仅暂存运行文件、驱动、使用说明与许可证。
+产物在 `dist`；`build/payload` 暂存主程序、MCP 入口、配套 DLL、驱动、使用说明与许可证。
+MCP 入口 `SoonLinkProMcp.exe` 与 `MCP使用说明.md` 随安装包分发，无须额外运行时。
 安装包和 Actions artifact 不包含项目源码、用户配置或调试文件。
 GitHub 为源码仓库自动生成的 Source code 下载属于源码分发，独立于安装包。
 

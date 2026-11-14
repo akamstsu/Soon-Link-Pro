@@ -1,6 +1,6 @@
 [package]
 name = "soon-link-pro"
-version = "2.4.8-dev"
+version = "2.4.9-dev"
 edition = "2021"
 license = "MIT"
 default-run = "SoonLinkPro"
@@ -15,13 +15,14 @@ egui = "0.31"
 image = { version = "0.25", default-features = false, features = ["png"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+getrandom = "0.4"
 semver = "1"
 cpal = "0.15"
 winreg = "0.55"
 bridge = { path = "bridge" }
 usbip-audio = { path = "vendor/usbip-audio" }
 windows = { version = "0.54", features = ["implement", "Win32_Foundation", "Win32_Media_Audio", "Win32_Media_Multimedia", "Win32_Media_Audio_Endpoints", "Win32_Storage_FileSystem", "Win32_Security", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_Variant", "Win32_UI_Shell_PropertiesSystem", "Win32_Devices_FunctionDiscovery", "Win32_System_Diagnostics_ToolHelp", "Win32_System_Threading"] }
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Com", "Win32_System_Threading", "Win32_System_IO", "Win32_System_Com_StructuredStorage", "Win32_System_Variant", "Win32_Storage_FileSystem", "Win32_Security", "Win32_Media_Audio", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging", "Win32_Graphics_Gdi", "Win32_System_LibraryLoader"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Com", "Win32_System_Threading", "Win32_System_IO", "Win32_System_Com_StructuredStorage", "Win32_System_Variant", "Win32_Storage_FileSystem", "Win32_Security", "Win32_Security_Authorization", "Win32_Media_Audio", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging", "Win32_Graphics_Gdi", "Win32_System_LibraryLoader"] }
 
 [profile.release]
 opt-level = 2
@@ -31,3 +32,7 @@ strip = true
 [[bin]]
 name = "SoonLinkPro"
 path = "src/main.rs"
+
+[[bin]]
+name = "SoonLinkProMcp"
+path = "src/bin/mcp.rs"

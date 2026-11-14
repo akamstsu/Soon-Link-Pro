@@ -36,7 +36,7 @@ try {
         New-Item -ItemType Directory -Path (Join-Path $payload $name) -Force | Out-Null
     }
     New-Item -ItemType Directory -Path $output -Force | Out-Null
-    foreach ($name in @('SoonLinkPro.exe', 'patchbay_asio.dll')) {
+    foreach ($name in @('SoonLinkPro.exe', 'SoonLinkProMcp.exe', 'patchbay_asio.dll')) {
         Copy-Item -LiteralPath (Join-Path $repoRoot "target\release\$name") -Destination $payload -Force
     }
     Copy-Item -LiteralPath $DriverInstaller -Destination (Join-Path $payload 'drivers\usbip-win2-0.9.8.1-x64.exe') -Force
@@ -51,6 +51,7 @@ try {
     Copy-Item -LiteralPath (Join-Path $repoRoot 'vendor\usbip-audio\LICENSE') -Destination (Join-Path $payload 'licenses\usbip-audio-LICENSE.txt') -Force
     Copy-Item -LiteralPath (Join-Path $repoRoot 'assets\upstream-licenses') -Destination (Join-Path $payload 'licenses') -Recurse -Force
     Copy-Item -LiteralPath (Join-Path $repoRoot 'WINDOWS_AUDIO.md') -Destination (Join-Path $payload '使用说明.md') -Force
+    Copy-Item -LiteralPath (Join-Path $repoRoot 'docs\MCP.md') -Destination (Join-Path $payload 'MCP使用说明.md') -Force
     Copy-Item -LiteralPath (Join-Path $repoRoot 'docs\RELEASE_NOTES.md') -Destination (Join-Path $payload '本次更新.md') -Force
     & $InnoCompiler "/DPayloadDir=$payload" "/DInstallerOutput=$output" "/DAppVersion=$numericVersion" "/DAppDisplayVersion=$version" (Join-Path $repoRoot 'installer\soon-link-pro.iss')
     if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed: $LASTEXITCODE" }

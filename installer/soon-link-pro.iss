@@ -52,10 +52,12 @@ Name: desktopicon; Description: "创建桌面快捷方式"; Flags: unchecked
 
 [Files]
 Source: "{#PayloadDir}\SoonLinkPro.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#PayloadDir}\SoonLinkProMcp.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#PayloadDir}\patchbay_asio.dll"; DestDir: "{app}"; Flags: ignoreversion regserver
 Source: "{#PayloadDir}\drivers\*"; DestDir: "{app}\drivers"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#PayloadDir}\licenses\*"; DestDir: "{app}\licenses"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#PayloadDir}\使用说明.md"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#PayloadDir}\MCP使用说明.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#PayloadDir}\本次更新.md"; DestDir: "{app}"; Flags: ignoreversion
 ; No profile, scene, routing file, log, source tree or recursive deletion is shipped.
 
@@ -88,9 +90,9 @@ begin
   try
     Locator := CreateOleObject('WbemScripting.SWbemLocator');
     Services := Locator.ConnectServer('', 'root\CIMV2');
-    Processes := Services.ExecQuery('SELECT ProcessId FROM Win32_Process WHERE Name="SoonLinkPro.exe"');
+    Processes := Services.ExecQuery('SELECT ProcessId FROM Win32_Process WHERE Name="SoonLinkPro.exe" OR Name="SoonLinkProMcp.exe"');
     if Processes.Count > 0 then
-      Result := '请先保存 DAW 工程、退出使用 Soon Link Pro ASIO 的宿主，并从托盘菜单退出 Soon Link Pro，再继续更新。现有配置会保留。';
+      Result := '请先保存 DAW 工程、退出使用 Soon Link Pro ASIO 的宿主，从托盘菜单退出 Soon Link Pro，并在 Agent 客户端停止 Soon Link Pro MCP 服务，再继续更新。现有配置会保留。';
   except
     Result := '无法核对旧版是否仍在运行，请关闭旧程序后重试安装。';
   end;

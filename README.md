@@ -12,6 +12,7 @@ Windows 音频路由工作台，连接实体声卡、DAW、Windows 虚拟设备�
 - 跳线面板显示流向和目标色渐变；紧凑路由矩阵按单声道交叉连接。
 - 应用声音采集、场景保存、DAW 启动时自动运行、托盘控制和宿主生命周期跟随。
 - 启动时后台检查新版本；在“关于与帮助”手动检查并打开发布页下载。
+- 本机 MCP 服务：Agent 可读取通道、批量跳线、调整音量与静音；设置中启用并复制连接配置。
 
 ## 快速使用
 
@@ -26,6 +27,7 @@ DAW 中选择 `Soon Link Pro ASIO`，其前段为物理声卡通道，后段为�
 关闭窗口收进托盘；退出请用托盘菜单。更新前保存并退出 DAW，再退出软件。
 
 详细使用与配置位置见 [WINDOWS_AUDIO.md](WINDOWS_AUDIO.md)。
+Agent 接入、工具参数和跳线示例见 [MCP 使用说明](docs/MCP.md)。
 
 
 ## 环境
@@ -49,8 +51,9 @@ cargo build --locked --release --workspace
 .\scripts\build.ps1
 ```
 
-输出为 `target\release\SoonLinkPro.exe` 和 `target\release\patchbay_asio.dll`。
-两者必须配套放置；DLL 文件名和注册标识作为安装接口保持稳定。
+输出为 `target\release\SoonLinkPro.exe`、`SoonLinkProMcp.exe` 和 `patchbay_asio.dll`。
+三个文件配套放置；MCP 入口不需要额外安装 Python 或 Node.js。
+DLL 文件名和注册标识作为安装接口保持稳定。
 仓库不包含用户配置、驱动二进制、编译缓存或发布压缩包。
 
 ## 安装包

@@ -2199,12 +2199,13 @@ dependencies = [
 
 [[package]]
 name = "soon-link-pro"
-version = "2.4.8-dev"
+version = "2.4.9-dev"
 dependencies = [
  "bridge",
  "cpal",
  "eframe",
  "egui",
+ "getrandom",
  "image",
  "raw-window-handle",
  "semver",
@@ -2218,7 +2219,7 @@ dependencies = [
 
 [[package]]
 name = "soon-link-pro-asio"
-version = "2.4.8-dev"
+version = "2.4.9-dev"
 dependencies = [
  "bridge",
  "windows-sys 0.61.2",

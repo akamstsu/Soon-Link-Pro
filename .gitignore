@@ -11,6 +11,7 @@
 *.tmp
 *.bak
 soon-link-pro-settings.json
+mcp-endpoint.json
 soon-link-pro-virtual-devices.log
 /drivers/*.exe
 Thumbs.db

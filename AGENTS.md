@@ -19,7 +19,8 @@ python scripts/update-notices.py --check
 cargo build --locked --release --workspace
 ```
 
-发布模式产物为 `target/release/SoonLinkPro.exe` 和 `target/release/patchbay_asio.dll`。
+发布模式产物为 `target/release/SoonLinkPro.exe`、`target/release/SoonLinkProMcp.exe`
+和 `target/release/patchbay_asio.dll`。
 工作区包括主程序、`bridge`、`driver` 和 vendored USB/IP 音频库；改动公共接口时检查所有使用方。
 请保留并提交 Cargo.lock；依赖升级应是有意的改动，不要顺带刷新整个锁文件。
 
@@ -32,6 +33,9 @@ cargo build --locked --release --workspace
 | `src/widgets.rs` | 按钮、推子、电平等共用控件 |
 | `src/about.rs` | 关于窗口、项目与第三方组件信息 |
 | `src/app_updates.rs` | 后台版本检查、开发版安装包版本解析与更新提示 |
+| `src/mcp.rs` | UI 线程上的路由快照、状态版本与原子批量修改 |
+| `src/mcp_protocol.rs`、`src/bin/mcp.rs` | MCP 会话、工具声明及独立 stdio 入口 |
+| `src/mcp_transport.rs` | 带令牌认证的本机 IPC、请求截止时间和有界队列 |
 | `src/audio.rs` | `Graph` / `Config`、配置迁移、路由计划、`Processor` 与 `Engine`、ASIO / WASAPI 流 |
 | `src/engine_control.rs` | 音频控制线程、启动/停止命令、异步事件与 revision 匹配 |
 | `src/asio.rs` | 物理 ASIO 设备枚举、COM 接口调用、缓冲和样本格式转换 |
@@ -100,6 +104,23 @@ cargo build --locked --release --workspace
 - 自定义 mesh 不会自动获得 egui 路径的边缘羽化；修改连线时保留物理像素级抗锯齿，考虑 DPI 与曲率。
 - 连线颜色和动效使用同一曲线；到达目标及循环重启时平滑衔接。遵循动画开关、窗口隐藏与重绘节流逻辑。
 - 检查小窗口、常见缩放比例、很多通道和空状态。源码编译成功不能代替这些视觉检查。
+
+## MCP 与 Agent 控制
+
+接入与协议范围见 [MCP.md](docs/MCP.md)。`SoonLinkProMcp.exe` 只处理 stdio 协议和本机 IPC，
+不能启动音频引擎或直接写用户配置。GUI 的 `poll_mcp` 在隐藏窗口提前返回前执行，
+修改后沿用 `audio_sync_pending` 和自动保存；不要从网络线程持有 `Graph` 或调用音频设备。
+
+- 保持默认关闭；端口仅绑定回环，令牌随机生成，连接文件使用仅当前 Windows 用户可访问的 DACL。
+  令牌不能放进复制的客户端配置、日志、仓库或安装包，停用及退出时删除连接文件。
+- 修改按稳定通道 key、方向及 `expected_revision` 校验；任何一项无效都不应用整个批次。
+  预览不能更改实际状态；超时或因停用服务而作废的排队请求不能在以后被应用。
+- MCP 逐单声道精确修改，不隐式扩展到立体声伙伴；保留未指定接线、音量、静音、隐藏状态及备注。
+  全部静音沿用 UI 的运行期语义。工具不替换设备、不更改场景、不安装驱动。
+- stdio stdout 只能输出逐行 JSON-RPC；诊断写 stderr。限制消息大小、操作数量、等待时间与队列容量。
+  增加工具时同步更新 schema、参数校验、用户说明和无设备回归测试。
+- 自动验证使用独立临时配置目录与模拟工作台，不能连到用户当前运行的工作台。
+  用户直播或明确禁止设备测试时，只运行这种隔离验证及构建，不启动 GUI 或操作设备。
 
 ## 如何选择验证
 

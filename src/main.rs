@@ -5,6 +5,7 @@ mod asio;
 mod audio;
 mod driver_tools;
 mod engine_control;
+mod mcp;
 mod process_capture;
 mod runtime;
 mod ui_shell;
@@ -49,6 +50,8 @@ struct Saved {
     motion_enabled: bool,
     #[serde(default)]
     low_power_animation: bool,
+    #[serde(default)]
+    mcp_enabled: bool,
 }
 fn enabled_by_default() -> bool {
     true
@@ -75,6 +78,9 @@ struct CardRename {
     focus: bool,
 }
 struct App {
+    mcp_server: Option<soon_link_pro::mcp_transport::LocalServer>,
+    mcp_enabled: bool,
+    mcp_status: String,
     runtime: Option<runtime::Runtime>,
     hardware_available: bool,
     channel_manager: bool,
@@ -239,11 +245,18 @@ impl App {
             .as_ref()
             .and_then(|s| s["low_power_animation"].as_bool())
             .unwrap_or(false);
+        let mcp_enabled = saved
+            .as_ref()
+            .and_then(|s| s["mcp_enabled"].as_bool())
+            .unwrap_or(false);
         let (inputs, outputs) = audio::wasapi_devices();
         let asios = asio::devices();
         ui_shell::apply_system_corners(cc);
         let automatic_audio = screenshot.is_none();
-        Self {
+        let mut app = Self {
+            mcp_server: None,
+            mcp_enabled,
+            mcp_status: String::new(),
             runtime: None,
             hardware_available: false,
             channel_manager: false,
@@ -297,7 +310,99 @@ impl App {
             device_refresh: None,
             motion_enabled,
             low_power_animation,
+        };
+        if automatic_audio && mcp_enabled {
+            app.start_mcp(&cc.egui_ctx);
         }
+        app
+    }
+    fn start_mcp(&mut self, ctx: &Context) {
+        let context = ctx.clone();
+        match soon_link_pro::mcp_transport::LocalServer::start(move || context.request_repaint()) {
+            Ok(server) => {
+                self.mcp_server = Some(server);
+                self.mcp_status = "已启用，等待 Agent 连接".into();
+            }
+            Err(error) => {
+                self.mcp_enabled = false;
+                self.mcp_status = format!("无法启用 Agent 控制：{error}");
+            }
+        }
+    }
+    fn poll_mcp(&mut self) {
+        if let Some(mut server) = self.mcp_server.take() {
+            server.poll(|name, arguments| match name {
+                "get_routing_state" => {
+                    mcp::validate_empty(arguments)?;
+                    Ok(mcp::state(
+                        &self.graph,
+                        self.panic,
+                        self.engine.is_some(),
+                        self.engine_busy,
+                        self.hardware_available,
+                    ))
+                }
+                "patch_routing" => {
+                    let (result, changed) =
+                        mcp::patch(&mut self.graph, &mut self.panic, arguments)?;
+                    if changed {
+                        self.dirty = true;
+                        self.audio_sync_pending = true;
+                        self.status = "Agent 已更新跳线／音量／静音".into();
+                        self.mcp_status = "已启用，最近一次 Agent 修改已应用".into();
+                    }
+                    Ok(result)
+                }
+                _ => Err("Unknown routing tool".into()),
+            });
+            self.mcp_server = Some(server);
+        }
+    }
+    fn mcp_panel(&mut self, ui: &mut Ui) {
+        ui.label(RichText::new("Agent 跳线控制 · MCP").size(15.0).strong());
+        small(ui, "让本机的 Agent 查看通道、批量跳线、调节音量与静音。");
+        ui.add_space(8.0);
+        if ui
+            .checkbox(&mut self.mcp_enabled, "允许本机 Agent 控制跳线")
+            .changed()
+        {
+            if self.mcp_enabled {
+                self.start_mcp(ui.ctx());
+            } else {
+                self.mcp_server = None;
+                self.mcp_status = "已关闭，Agent 无法读取或修改跳线".into();
+            }
+            self.dirty = true;
+        }
+        if !self.mcp_status.is_empty() {
+            ui.label(&self.mcp_status);
+        }
+        ui.add_space(10.0);
+        small(
+            ui,
+            "启用后可直接改变正在播放的声音；关闭此开关即可停止后续控制。仅支持本机连接。",
+        );
+        small(
+            ui,
+            "先打开本软件，再把下方配置加入支持 stdio MCP 的 Agent。窗口收进托盘后仍可使用。",
+        );
+        let config = serde_json::to_string_pretty(&soon_link_pro::mcp_transport::client_config())
+            .unwrap_or_default();
+        ui.add_space(8.0);
+        if button(ui, "复制 MCP 配置", true).clicked() {
+            ui.ctx().copy_text(config.clone());
+        }
+        ui.add_space(6.0);
+        ui.label(RichText::new(config).monospace().size(11.0));
+        ui.add_space(8.0);
+        small(
+            ui,
+            "按单声道精确操作；立体声需要分别指定 L／R。不更换设备、不启动引擎、不安装驱动。",
+        );
+        small(
+            ui,
+            "接线、音量和通道静音沿用自动保存；全部静音与界面一致，仅在本次运行有效。",
+        );
     }
     fn save(&mut self) {
         let saved = Saved {
@@ -308,6 +413,7 @@ impl App {
             unlinked_stereo: self.unlinked_stereo.clone(),
             motion_enabled: self.motion_enabled,
             low_power_animation: self.low_power_animation,
+            mcp_enabled: self.mcp_enabled,
         };
         if let Ok(bytes) = serde_json::to_vec_pretty(&saved) {
             let p = data_path();
@@ -1783,7 +1889,7 @@ impl App {
             .show(ctx, |ui| {
                 ui_shell::intro(ui, "音频工作台", "选择音频后端、管理虚拟设备及 DAW 接入。");
                 ui.horizontal(|ui| {
-                    for (i, t) in ["声卡与音频", "虚拟设备与 DAW", "界面与性能"].iter().enumerate() {
+                    for (i, t) in ["声卡与音频", "虚拟设备与 DAW", "界面与性能", "Agent / MCP"].iter().enumerate() {
                         if button(ui, *t, self.settings_tab == i).clicked() {
                             self.settings_tab = i;
                         }
@@ -1796,7 +1902,9 @@ impl App {
                     .show(ui, |ui| {
                         ui_shell::section().show(ui, |ui| {
                             ui.set_width(ui.available_width());
-                if self.settings_tab == 2 {
+                if self.settings_tab == 3 {
+                    self.mcp_panel(ui);
+                } else if self.settings_tab == 2 {
                     ui.label(RichText::new("连线动效").size(15.0).strong());
                     small(ui, "动效只用于指示信号流向，关闭后音频和电平表仍正常工作。");
                     ui.add_space(8.0);
@@ -2558,6 +2666,7 @@ impl eframe::App for App {
         }
         self.poll_engine();
         self.poll_driver_tools();
+        self.poll_mcp();
         if self.audio_sync_pending {
             if let Some(e) = &self.engine {
                 e.processor.sync(&self.graph, self.panic);
@@ -2735,6 +2844,7 @@ impl eframe::App for App {
     }
     fn on_exit(&mut self, _: Option<&eframe::glow::Context>) {
         usb_audio::log("Runtime: graceful shutdown");
+        self.mcp_server = None;
         self.engine = None;
         self.engine_controller
             .stop(self.engine_revision.wrapping_add(1));
