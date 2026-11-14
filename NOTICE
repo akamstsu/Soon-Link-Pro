@@ -5,6 +5,10 @@ https://www.zhibin.club
 
 本声明适用于项目原创部分，不替代第三方组件的版权和许可。
 项目原创代码使用 MIT 许可证，见 LICENSE。第三方组件继续适用各自许可证。
+允许免费使用、修改、商用和再分发。复制或分发本软件及其实质性部分时，
+必须保留版权声明和 MIT 许可文本；修改版和二进制分发同样适用。
+建议随分发附带 LICENSE、本 NOTICE 与适用的第三方声明及完整许可。
+以上是对现有许可的说明，不增加界面署名等额外条件；许可范围以各许可原文为准。
 第三方声明：assets/THIRD_PARTY_NOTICES.md
 USB/IP 音频组件：vendor/usbip-audio/LICENSE
 USB/IP Windows 驱动：assets/usbip-win2-LICENSE.txt

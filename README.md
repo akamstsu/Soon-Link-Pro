@@ -1,8 +1,30 @@
-# Soon Link Pro
+# Soon Link Pro · 免费开源的 Windows 音频跳线与虚拟调音台
 
-Windows 音频路由工作台，连接实体声卡、DAW、Windows 虚拟设备与应用声音。
+**免费使用，无需订阅或付费激活。** 在 Windows 上连接实体声卡、DAW、虚拟音频设备与应用声音，
+通过可视化音频跳线、路由矩阵、音量和静音控制，组织直播、录音与日常监听的声音。
+
+Free, open-source Windows audio patchbay and virtual mixer for ASIO / WASAPI, DAWs and streaming audio routing.
+
+**[免费下载 Windows x64 安装包](https://github.com/akamstsu/Soon-Link-Pro/releases/latest)**
+· [历史版本](https://github.com/akamstsu/Soon-Link-Pro/releases)
+· [使用说明](WINDOWS_AUDIO.md)
+· [Agent 跳线接入](docs/MCP.md)
 
 版权方：挚彬Club；作者：赤松_Akamatsu。
+
+## 可以用来做什么
+
+| 需求 | 用法 |
+| --- | --- |
+| 直播声音分流 | 将麦克风、游戏、音乐等来源按需接到虚拟录音设备，供 OBS 等直播软件选择 |
+| ASIO 声卡与 DAW 跳线 | DAW 使用 `Soon Link Pro ASIO`，连接所选物理声卡通道与虚拟总线 |
+| 应用声音单独控制 | 添加应用声音采集，分别控制音量、静音和输出去向 |
+| 一路声音送多个目标 | 把同一输入同时接到监听设备与其他输出，保存为场景 |
+| 让 Agent 帮忙接线 | 开启本机 MCP，读取通道、预览接线，再批量应用修改 |
+
+如果你使用过 ASIO Link Pro 或 Voicemeeter，可以从这里了解另一种免费音频路由方案。
+这里的“虚拟调音台”侧重跳线、混音、音量与静音；当前不内置 EQ、压缩、混响或 VST 插件宿主。
+具体声卡、DAW 和直播组合的兼容性仍需在目标环境验证。
 
 ## 功能
 
@@ -93,7 +115,7 @@ cargo build --locked --release --workspace
 DLL 文件名和注册标识作为安装接口保持稳定。
 仓库不包含用户配置、驱动二进制、编译缓存或发布压缩包。
 
-## 安装包
+## 自行构建安装包
 
 准备 Inno Setup 6 与 usbip-win2 0.9.8.1 x64 原厂安装器，然后执行：
 
@@ -122,9 +144,14 @@ DLL 文件名和注册标识作为安装接口保持稳定。
 
 ## 许可证与第三方组件
 
+本项目使用 [MIT 许可证](LICENSE)：允许免费使用、修改、商用和再分发。
+**免费开源不等于放弃版权；复制或分发本软件及其实质性部分时，必须保留版权声明和许可文本。**
+这同样适用于修改版和二进制安装包。MIT 不要求修改版公开源码，也不强制保留界面中的作者署名。
+分发时如何保留声明、品牌使用与附加条款的区别，见 [许可与版权说明](docs/LICENSING.md)。
+
 第三方组件的版权和许可见 [THIRD_PARTY_NOTICES.md](assets/THIRD_PARTY_NOTICES.md)、
 `assets/upstream-licenses` 和 `vendor/usbip-audio/LICENSE`。
-本项目许可证见 [LICENSE](LICENSE)。第三方组件继续遵循各自许可证；项目品牌与 Logo 不表示对衍生产品的背书。
+第三方组件继续遵循各自许可证；项目品牌与 Logo 不表示对衍生产品的背书。
 ASIO 是 Steinberg 的商标，Windows 是 Microsoft 的商标；名称仅用于接口说明。
 
 ## 参与开发与自动构建
