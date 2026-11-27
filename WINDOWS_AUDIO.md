@@ -1,4 +1,4 @@
-# Soon Link Pro R2.4.8-dev · Windows x64
+# Soon Link Pro R2.4.10-dev · Windows x64
 
 ## 检查软件更新
 

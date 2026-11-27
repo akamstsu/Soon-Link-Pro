@@ -2199,7 +2199,7 @@ dependencies = [
 
 [[package]]
 name = "soon-link-pro"
-version = "2.4.9-dev"
+version = "2.4.10-dev"
 dependencies = [
  "bridge",
  "cpal",
@@ -2219,7 +2219,7 @@ dependencies = [
 
 [[package]]
 name = "soon-link-pro-asio"
-version = "2.4.9-dev"
+version = "2.4.10-dev"
 dependencies = [
  "bridge",
  "windows-sys 0.61.2",
