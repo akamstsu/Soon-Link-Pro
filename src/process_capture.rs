@@ -9,12 +9,12 @@ use std::{
         mpsc, Arc, Mutex, OnceLock,
     },
     thread::{self, JoinHandle},
-    time::Duration,
+    time::{Duration, Instant},
 };
 use windows::{
     core::{implement, IUnknown, Interface, HRESULT, PCWSTR, PROPVARIANT},
     Win32::{
-        Foundation::{CloseHandle, HANDLE, WAIT_OBJECT_0},
+        Foundation::{CloseHandle, HANDLE, WAIT_OBJECT_0, WAIT_TIMEOUT},
         Media::Audio::Endpoints::IAudioMeterInformation,
         Media::Audio::*,
         Storage::FileSystem::{GetFileVersionInfoSizeW, GetFileVersionInfoW, VerQueryValueW},
@@ -26,8 +26,9 @@ use windows::{
             Diagnostics::ToolHelp::*,
             Threading::{
                 AvRevertMmThreadCharacteristics, AvSetMmThreadCharacteristicsW, CreateEventW,
-                OpenProcess, QueryFullProcessImageNameW, SetEvent, WaitForSingleObject, INFINITE,
-                PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
+                OpenProcess, QueryFullProcessImageNameW, SetEvent, WaitForMultipleObjects,
+                WaitForSingleObject, INFINITE, PROCESS_NAME_WIN32,
+                PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE,
             },
         },
     },
@@ -35,7 +36,8 @@ use windows::{
 
 pub const MAX_APPLICATIONS: usize = bridge::MAX_APPLICATIONS;
 const ACTIVATION_TIMEOUT: Duration = Duration::from_secs(4);
-const STARTUP_TIMEOUT: Duration = Duration::from_secs(12);
+const PROCESS_RETRY: Duration = Duration::from_secs(2);
+const CAPTURE_RETRY: Duration = Duration::from_secs(5);
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Target {
@@ -48,50 +50,91 @@ pub struct Target {
     #[serde(skip)]
     pub audio_active: bool,
 }
-fn processes() -> Vec<Target> {
+fn process_image(handle: HANDLE) -> windows::core::Result<String> {
+    let mut buffer = [0u16; 32768];
+    let mut len = buffer.len() as u32;
     unsafe {
-        let Ok(snapshot) = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) else {
-            return Vec::new();
-        };
+        QueryFullProcessImageNameW(
+            handle,
+            PROCESS_NAME_WIN32,
+            windows::core::PWSTR(buffer.as_mut_ptr()),
+            &mut len,
+        )?;
+    }
+    Ok(String::from_utf16_lossy(&buffer[..len as usize]))
+}
+
+fn processes(exe_name: Option<&str>) -> windows::core::Result<Vec<(Target, u32)>> {
+    unsafe {
+        let snapshot = OwnedHandle(CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)?);
         let mut entry = PROCESSENTRY32W::default();
         entry.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
         let mut out = Vec::new();
-        let mut next = Process32FirstW(snapshot, &mut entry).is_ok();
-        while next {
-            if entry.th32ProcessID != 0 && entry.th32ProcessID != std::process::id() {
+        Process32FirstW(snapshot.0, &mut entry)?;
+        loop {
+            if entry.th32ProcessID != 0
+                && entry.th32ProcessID != std::process::id()
+                && exe_name.is_none_or(|name| {
+                    let len = entry
+                        .szExeFile
+                        .iter()
+                        .position(|&c| c == 0)
+                        .unwrap_or(entry.szExeFile.len());
+                    String::from_utf16_lossy(&entry.szExeFile[..len]).eq_ignore_ascii_case(name)
+                })
+            {
                 if let Ok(handle) = OpenProcess(
                     PROCESS_QUERY_LIMITED_INFORMATION,
                     false,
                     entry.th32ProcessID,
                 ) {
-                    let mut buffer = [0u16; 32768];
-                    let mut len = buffer.len() as u32;
-                    if QueryFullProcessImageNameW(
-                        handle,
-                        PROCESS_NAME_WIN32,
-                        windows::core::PWSTR(buffer.as_mut_ptr()),
-                        &mut len,
-                    )
-                    .is_ok()
-                    {
-                        let exe = String::from_utf16_lossy(&buffer[..len as usize]);
-                        out.push(Target {
-                            pid: entry.th32ProcessID,
-                            exe,
-                            display_name: String::new(),
-                            speaking: false,
-                            audio_active: false,
-                        });
+                    let handle = OwnedHandle(handle);
+                    if let Ok(exe) = process_image(handle.0) {
+                        out.push((
+                            Target {
+                                pid: entry.th32ProcessID,
+                                exe,
+                                display_name: String::new(),
+                                speaking: false,
+                                audio_active: false,
+                            },
+                            entry.th32ParentProcessID,
+                        ));
                     }
-                    let _ = CloseHandle(handle);
                 }
             }
-            next = Process32NextW(snapshot, &mut entry).is_ok();
+            if Process32NextW(snapshot.0, &mut entry).is_err() {
+                break;
+            }
         }
-        let _ = CloseHandle(snapshot);
-        out
+        Ok(out)
     }
 }
+
+fn capture_pid(target: &Target, processes: &[(Target, u32)]) -> Option<u32> {
+    let matching = |pid| {
+        processes
+            .iter()
+            .find(|(app, _)| app.pid == pid && app.exe.eq_ignore_ascii_case(&target.exe))
+    };
+    if matching(target.pid).is_some() {
+        return Some(target.pid);
+    }
+    // The original PID is gone. Prefer a process tree root over a renderer
+    // so a restarted browser can capture audio from its new children.
+    processes
+        .iter()
+        .find(|(app, parent)| {
+            app.exe.eq_ignore_ascii_case(&target.exe) && matching(*parent).is_none()
+        })
+        .or_else(|| {
+            processes
+                .iter()
+                .find(|(app, _)| app.exe.eq_ignore_ascii_case(&target.exe))
+        })
+        .map(|(app, _)| app.pid)
+}
+
 impl Target {
     pub fn label(&self) -> String {
         if !self.display_name.trim().is_empty() {
@@ -102,18 +145,34 @@ impl Target {
             .map(|s| s.to_string_lossy().into_owned())
             .unwrap_or_else(|| format!("进程 {}", self.pid))
     }
-    fn resolve(&self) -> Result<u32, String> {
-        if self.pid == std::process::id() {
-            return Ok(self.pid);
+    fn resolve(&self) -> Result<Option<(u32, OwnedHandle)>, String> {
+        let name = std::path::Path::new(&self.exe)
+            .file_name()
+            .and_then(|name| name.to_str());
+        let apps = processes(name).map_err(|error| format!("读取运行中的应用失败：{error}"))?;
+        let Some(pid) = capture_pid(self, &apps) else {
+            return Ok(None);
+        };
+        let process = OwnedHandle(
+            unsafe {
+                OpenProcess(
+                    PROCESS_SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION,
+                    false,
+                    pid,
+                )
+            }
+            .map_err(|error| format!("无法监测应用进程：{error}"))?,
+        );
+        // The snapshot and OpenProcess are separate operations. Recheck the path
+        // while holding the same process handle used to observe exit.
+        if !process_image(process.0)
+            .map_err(|error| error.to_string())?
+            .eq_ignore_ascii_case(&self.exe)
+            || unsafe { WaitForSingleObject(process.0, 0) } != WAIT_TIMEOUT
+        {
+            return Ok(None);
         }
-        // Resolving a saved target must not enumerate sessions, read version resources,
-        // or sample meters on the engine owner thread.
-        let apps = processes();
-        apps.iter()
-            .find(|t| t.pid == self.pid && t.exe.eq_ignore_ascii_case(&self.exe))
-            .or_else(|| apps.iter().find(|t| t.exe.eq_ignore_ascii_case(&self.exe)))
-            .map(|t| t.pid)
-            .ok_or_else(|| format!("应用未运行：{}", self.label()))
+        Ok(Some((pid, process)))
     }
 }
 
@@ -146,7 +205,7 @@ pub fn applications() -> Inventory {
         }
     };
     let mut grouped = HashMap::<String, Target>::new();
-    for mut target in processes() {
+    for (mut target, _) in processes(None).unwrap_or_default() {
         let key = target.exe.to_lowercase();
         let cached = cache.lock().ok().and_then(|names| names.get(&key).cloned());
         target.display_name = cached.unwrap_or_else(|| {
@@ -388,7 +447,10 @@ struct ActivationStorage {
 unsafe impl Send for ActivationStorage {}
 unsafe impl Sync for ActivationStorage {}
 
-unsafe fn activate_process(pid: u32) -> Result<IAudioClient, String> {
+unsafe fn activate_process(pid: u32, stop: &AtomicBool) -> Result<IAudioClient, String> {
+    if stop.load(Ordering::Acquire) {
+        return Err("应用采集已停止".into());
+    }
     let mut parameters = Box::new(AUDIOCLIENT_ACTIVATION_PARAMS {
         ActivationType: AUDIOCLIENT_ACTIVATION_TYPE_PROCESS_LOOPBACK,
         Anonymous: AUDIOCLIENT_ACTIVATION_PARAMS_0 {
@@ -429,16 +491,33 @@ unsafe fn activate_process(pid: u32) -> Result<IAudioClient, String> {
         &callback,
     )
     .map_err(|error| format!("Windows 应用采集激活失败：{error}"))?;
-    receiver
-        .recv_timeout(ACTIVATION_TIMEOUT)
-        .map_err(|_| "Windows 应用采集激活超时".to_string())?
+    // This only cancels our wait. The Windows callback retains its own storage
+    // and can complete after the capture thread has stopped.
+    let deadline = Instant::now() + ACTIVATION_TIMEOUT;
+    loop {
+        if stop.load(Ordering::Acquire) {
+            return Err("应用采集已停止".into());
+        }
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Err("Windows 应用采集激活超时".into());
+        }
+        match receiver.recv_timeout(remaining.min(Duration::from_millis(100))) {
+            Ok(result) => return result,
+            Err(mpsc::RecvTimeoutError::Timeout) => (),
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                return Err("Windows 未完成应用采集激活".into())
+            }
+        }
+    }
 }
 
-struct CaptureEvent(HANDLE);
-// The event can be signaled across threads; its last Arc owns and closes the handle.
-unsafe impl Send for CaptureEvent {}
-unsafe impl Sync for CaptureEvent {}
-impl Drop for CaptureEvent {
+struct OwnedHandle(HANDLE);
+// Kernel handles can be used by any thread in this process. The owned handle
+// (or its last Arc) closes it after all waiters and signalers have finished.
+unsafe impl Send for OwnedHandle {}
+unsafe impl Sync for OwnedHandle {}
+impl Drop for OwnedHandle {
     fn drop(&mut self) {
         unsafe {
             let _ = CloseHandle(self.0);
@@ -455,74 +534,172 @@ impl Drop for AudioPriority {
         }
     }
 }
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum CaptureState {
+    Connecting,
+    Waiting,
+    Capturing,
+    Retrying(String),
+    Unavailable(String),
+}
+impl CaptureState {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Connecting => "连接中",
+            Self::Waiting => "等待应用启动",
+            Self::Capturing => "采集中",
+            Self::Retrying(_) => "自动重试",
+            Self::Unavailable(_) => "采集不可用",
+        }
+    }
+    pub fn detail(&self) -> &str {
+        match self {
+            Self::Connecting => "正在连接这个应用的声音",
+            Self::Waiting => "打开该应用后会自动采集，接线和音量已保留",
+            Self::Capturing => "应用已连接；是否正在发声请看电平",
+            Self::Retrying(error) | Self::Unavailable(error) => error,
+        }
+    }
+}
+pub type SharedCaptureState = Arc<Mutex<CaptureState>>;
+
 pub struct ProcessCapture {
+    pub state: SharedCaptureState,
+    worker: Option<CaptureThread>,
+}
+struct CaptureThread {
     stop: Arc<AtomicBool>,
-    event: Arc<CaptureEvent>,
+    event: Arc<OwnedHandle>,
     thread: Option<JoinHandle<()>>,
 }
-impl Drop for ProcessCapture {
-    fn drop(&mut self) {
+impl CaptureThread {
+    fn request_stop(&self) {
         self.stop.store(true, Ordering::Release);
         unsafe {
             let _ = SetEvent(self.event.0);
         }
-        if let Some(t) = self.thread.take() {
-            let _ = t.join();
+        if let Some(thread) = &self.thread {
+            thread.thread().unpark();
+        }
+    }
+}
+impl Drop for CaptureThread {
+    fn drop(&mut self) {
+        self.request_stop();
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
         }
     }
 }
 impl ProcessCapture {
-    pub fn start(target: &Target, processor: Arc<Processor>, slot: usize) -> Result<Self, String> {
-        Self::start_format(target, processor, slot, false)
+    pub fn start(target: &Target, processor: Arc<Processor>, slot: usize) -> Self {
+        let state = Arc::new(Mutex::new(CaptureState::Connecting));
+        let worker = match CaptureThread::spawn(target.clone(), processor, slot, state.clone()) {
+            Ok(worker) => Some(worker),
+            Err(error) => {
+                *state.lock().unwrap() = CaptureState::Unavailable(error);
+                None
+            }
+        };
+        Self { state, worker }
     }
-    fn start_format(
-        target: &Target,
+    pub fn request_stop(&self) {
+        if let Some(worker) = &self.worker {
+            worker.request_stop();
+        }
+    }
+}
+impl CaptureThread {
+    fn spawn(
+        target: Target,
         processor: Arc<Processor>,
         slot: usize,
-        force_pcm: bool,
+        state: SharedCaptureState,
     ) -> Result<Self, String> {
         if slot >= processor.applications.len() {
             return Err("无效的应用采集通道".into());
         }
-        let event = Arc::new(CaptureEvent(
+        let event = Arc::new(OwnedHandle(
             unsafe { CreateEventW(None, false, false, None) }.map_err(|e| e.to_string())?,
         ));
         let worker_event = event.clone();
-        let pid = target.resolve()?;
-        let label = target.label();
         let stop = Arc::new(AtomicBool::new(false));
         let flag = stop.clone();
-        let (tx, rx) = mpsc::sync_channel(1);
-        let thread = thread::spawn(move || unsafe {
-            if let Err(e) = CoInitializeEx(None, COINIT_MULTITHREADED).ok() {
-                let _ = tx.send(Err(e.to_string()));
-                return;
-            }
-            let result = worker(pid, &processor, slot, &flag, &worker_event, force_pcm, &tx);
-            if let Err(e) = result {
-                let message = format!("应用采集 {label}：{e}");
-                let _ = tx.try_send(Err(message.clone()));
-                if let Ok(mut errors) = processor.errors.lock() {
-                    if errors.len() < 8 {
-                        errors.push(message);
+        let thread = thread::Builder::new()
+            .name(format!("soon-link-app-capture-{slot}"))
+            .spawn(move || unsafe {
+                let mut publish = |next| {
+                    if let Ok(mut current) = state.lock() {
+                        *current = next;
                     }
+                };
+                if let Err(error) = CoInitializeEx(None, COINIT_MULTITHREADED).ok() {
+                    publish(CaptureState::Unavailable(format!(
+                        "无法初始化应用采集：{error}"
+                    )));
+                    return;
                 }
-            }
-            CoUninitialize();
-        });
-        let capture = Self {
+                run_capture_loop(
+                    &flag,
+                    || target.resolve(),
+                    |(pid, process), ready| {
+                        let result =
+                            worker(pid, &process, &processor, slot, &flag, &worker_event, ready);
+                        // Windows can report a packet/activation error before the
+                        // wait observes exit. Either way an exited app is absent.
+                        if WaitForSingleObject(process.0, 0) == WAIT_OBJECT_0 {
+                            Ok(())
+                        } else {
+                            result
+                        }
+                    },
+                    &mut publish,
+                    thread::park_timeout,
+                );
+                CoUninitialize();
+            })
+            .map_err(|error| format!("无法创建应用采集线程：{error}"))?;
+        Ok(Self {
             stop,
             event,
             thread: Some(thread),
-        };
-        match rx.recv_timeout(STARTUP_TIMEOUT) {
-            Ok(Ok(())) => Ok(capture),
-            Ok(Err(e)) => Err(e),
-            Err(_) => {
-                capture.stop.store(true, Ordering::Release);
-                Err("应用音频初始化超时，请确认 Windows 支持应用声音采集".into())
+        })
+    }
+}
+
+// Exactly one worker owns the producer for a slot, across all attempts. The
+// audio callback remains its consumer and drains any queued samples on exit.
+fn run_capture_loop<T>(
+    stop: &AtomicBool,
+    mut resolve: impl FnMut() -> Result<Option<T>, String>,
+    mut capture: impl FnMut(T, &mut dyn FnMut()) -> Result<(), String>,
+    mut publish: impl FnMut(CaptureState),
+    mut wait: impl FnMut(Duration),
+) {
+    while !stop.load(Ordering::Acquire) {
+        let result = match resolve() {
+            Ok(Some(process)) if !stop.load(Ordering::Acquire) => {
+                publish(CaptureState::Connecting);
+                capture(process, &mut || publish(CaptureState::Capturing))
             }
+            Ok(_) => Ok(()),
+            Err(error) => Err(error),
+        };
+        if stop.load(Ordering::Acquire) {
+            break;
         }
+        let delay = match result {
+            Ok(()) => {
+                publish(CaptureState::Waiting);
+                PROCESS_RETRY
+            }
+            Err(error) => {
+                publish(CaptureState::Retrying(error));
+                CAPTURE_RETRY
+            }
+        };
+        wait(delay);
     }
 }
 fn pcm_format(rate: u32) -> WAVEFORMATEX {
@@ -609,8 +786,13 @@ impl Drop for RunningClient {
     }
 }
 
-unsafe fn initialize_process(pid: u32, rate: u32, pcm: bool) -> Result<IAudioClient, String> {
-    let client = activate_process(pid)?;
+unsafe fn initialize_process(
+    pid: u32,
+    rate: u32,
+    pcm: bool,
+    stop: &AtomicBool,
+) -> Result<IAudioClient, String> {
+    let client = activate_process(pid, stop)?;
     let mut format = pcm_format(rate);
     if !pcm {
         format.wFormatTag = windows::Win32::Media::Multimedia::WAVE_FORMAT_IEEE_FLOAT as u16;
@@ -626,28 +808,24 @@ unsafe fn initialize_process(pid: u32, rate: u32, pcm: bool) -> Result<IAudioCli
 
 unsafe fn worker(
     pid: u32,
+    process: &OwnedHandle,
     processor: &Processor,
     slot: usize,
     stop: &AtomicBool,
-    event: &CaptureEvent,
-    force_pcm: bool,
-    ready: &mpsc::SyncSender<Result<(), String>>,
+    event: &OwnedHandle,
+    ready: &mut dyn FnMut(),
 ) -> Result<(), String> {
     // Format negotiation uses a fresh activation for each attempt. A client
     // whose Initialize failed is never reused for a different representation.
-    let (client, pcm) = if force_pcm {
-        (initialize_process(pid, processor.rate, true)?, true)
-    } else {
-        match initialize_process(pid, processor.rate, false) {
-            Ok(client) => (client, false),
-            Err(float_error) => {
-                if stop.load(Ordering::Acquire) {
-                    return Ok(());
-                }
-                let client = initialize_process(pid, processor.rate, true)
-                    .map_err(|pcm_error| format!("{float_error}；PCM 回退失败：{pcm_error}"))?;
-                (client, true)
+    let (client, pcm) = match initialize_process(pid, processor.rate, false, stop) {
+        Ok(client) => (client, false),
+        Err(float_error) => {
+            if stop.load(Ordering::Acquire) || WaitForSingleObject(process.0, 0) == WAIT_OBJECT_0 {
+                return Ok(());
             }
+            let client = initialize_process(pid, processor.rate, true, stop)
+                .map_err(|pcm_error| format!("{float_error}；PCM 回退失败：{pcm_error}"))?;
+            (client, true)
         }
     };
     if stop.load(Ordering::Acquire) {
@@ -663,17 +841,8 @@ unsafe fn worker(
         AudioPriority(AvSetMmThreadCharacteristicsW(PCWSTR(task.as_ptr()), &mut task_index).ok());
     client.Start().map_err(|error| error.to_string())?;
     let _running = RunningClient(client);
-    if ready.send(Ok(())).is_err() {
-        return Ok(());
-    }
-    while !stop.load(Ordering::Acquire) {
-        let wait = WaitForSingleObject(event.0, INFINITE);
-        if wait != WAIT_OBJECT_0 {
-            return Err(format!(
-                "等待应用音频事件失败：{}",
-                std::io::Error::last_os_error()
-            ));
-        }
+    ready();
+    while !stop.load(Ordering::Acquire) && wait_for_capture_data(process, event)? {
         while !stop.load(Ordering::Acquire) {
             if packets
                 .GetNextPacketSize()
@@ -712,10 +881,106 @@ unsafe fn worker(
     Ok(())
 }
 
+fn wait_for_capture_data(process: &OwnedHandle, event: &OwnedHandle) -> Result<bool, String> {
+    // If both are signaled, prefer process exit to reading any remaining packets.
+    let wait = unsafe { WaitForMultipleObjects(&[process.0, event.0], false, INFINITE) };
+    if wait == WAIT_OBJECT_0 {
+        Ok(false)
+    } else if wait.0 == WAIT_OBJECT_0.0 + 1 {
+        Ok(true)
+    } else {
+        Err(format!(
+            "等待应用音频事件失败：{}",
+            std::io::Error::last_os_error()
+        ))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::sync::atomic::AtomicU32;
+
+    #[test]
+    fn missing_app_and_capture_failures_retry_without_replacing_the_slot() {
+        use CaptureState::*;
+        let stop = AtomicBool::new(false);
+        let mut processes = [None, Some(21), Some(21), None, Some(44)].into_iter();
+        let mut states = Vec::new();
+        let mut attempts = Vec::new();
+        let mut delays = Vec::new();
+        run_capture_loop(
+            &stop,
+            || Ok(processes.next().expect("unexpected retry")),
+            |pid, ready| {
+                attempts.push(pid);
+                if attempts.len() == 1 {
+                    return Err("模拟激活失败".into());
+                }
+                ready();
+                if pid == 44 {
+                    stop.store(true, Ordering::Release);
+                }
+                Ok(())
+            },
+            |state| states.push(state),
+            |delay| delays.push(delay),
+        );
+        assert_eq!(attempts, [21, 21, 44]);
+        assert_eq!(
+            delays,
+            [PROCESS_RETRY, CAPTURE_RETRY, PROCESS_RETRY, PROCESS_RETRY]
+        );
+        assert_eq!(
+            states,
+            [
+                Waiting,
+                Connecting,
+                Retrying("模拟激活失败".into()),
+                Connecting,
+                Capturing,
+                Waiting,
+                Waiting,
+                Connecting,
+                Capturing
+            ]
+        );
+    }
+
+    #[test]
+    fn reconnect_matches_the_full_path_and_prefers_the_process_tree() {
+        fn target(pid: u32, exe: &str) -> Target {
+            Target {
+                pid,
+                exe: exe.into(),
+                display_name: String::new(),
+                speaking: false,
+                audio_active: false,
+            }
+        }
+        let saved = target(5, r"C:\Browser\app.exe");
+        let unrelated = (target(5, r"D:\Other\app.exe"), 0);
+        let parent = (target(20, r"C:\BROWSER\APP.EXE"), 0);
+        let child = (target(21, r"C:\Browser\app.exe"), 20);
+        assert_eq!(capture_pid(&saved, std::slice::from_ref(&unrelated)), None);
+        let selected = child.0.clone();
+        let live = [unrelated, child, parent];
+        assert_eq!(capture_pid(&saved, &live), Some(20));
+        assert_eq!(capture_pid(&selected, &live), Some(21));
+    }
+
+    #[test]
+    fn process_exit_takes_precedence_over_capture_event() {
+        let exited = OwnedHandle(unsafe { CreateEventW(None, true, false, None) }.unwrap());
+        let capture = OwnedHandle(unsafe { CreateEventW(None, false, true, None) }.unwrap());
+        assert_eq!(wait_for_capture_data(&exited, &capture), Ok(true));
+        unsafe {
+            SetEvent(exited.0).unwrap();
+            SetEvent(capture.0).unwrap();
+        }
+        assert_eq!(wait_for_capture_data(&exited, &capture), Ok(false));
+    }
+
     #[test]
     fn packet_admission_handles_empty_silent_and_invalid_data() {
         let null = std::ptr::null();

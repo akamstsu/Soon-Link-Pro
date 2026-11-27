@@ -1234,6 +1234,9 @@ impl Drop for Engine {
             .shared()
             .generation
             .store(0, Ordering::Release);
+        for capture in &self.app_captures {
+            capture.request_stop();
+        }
         self.system_transport = None;
         self.app_captures.clear();
         self.streams.clear();
@@ -1365,6 +1368,13 @@ fn input_stream(
     .map_err(|e| e.to_string())
 }
 impl Engine {
+    pub fn app_capture_states(&self) -> Vec<crate::process_capture::SharedCaptureState> {
+        self.app_captures
+            .iter()
+            .map(|capture| capture.state.clone())
+            .collect()
+    }
+
     pub fn start(c: &Config, g: &mut Graph) -> Result<Self, String> {
         if g.bus_count == 0 {
             g.bus_count = 1;
@@ -1380,7 +1390,7 @@ impl Engine {
         if c.virtual_devices && g.bus_count > 0 && usbip_audio::usbip_exe::find().is_none() {
             return Err(crate::usb_audio::driver_status());
         }
-        if c.backend == 1 {
+        let mut engine = if c.backend == 1 {
             let d = asio::devices()
                 .into_iter()
                 .find(|d| {
@@ -1454,14 +1464,6 @@ impl Engine {
                     time_switch: None,
                 },
             )?;
-            let mut apps = Vec::new();
-            for (slot, t) in g.applications.iter().enumerate() {
-                apps.push(crate::process_capture::ProcessCapture::start(
-                    t,
-                    p.clone(),
-                    slot,
-                )?);
-            }
             *NATIVE.lock().map_err(|e| e.to_string())? = Some(NativeState {
                 scratch: FrameScratch::new(&p),
                 plan: p.plan(),
@@ -1478,24 +1480,17 @@ impl Engine {
                 *NATIVE.lock().unwrap() = None;
                 return Err(e);
             }
-            let mut engine = Self {
+            Self {
                 native: Some(a),
                 streams: Vec::new(),
-                app_captures: apps,
+                app_captures: Vec::new(),
                 system_transport: None,
                 processor: p,
                 description: format!(
                     "{} · 全部硬件通道 {} 入 / {} 出 · {} 帧",
                     d.name, ni, no, c.buffer
                 ),
-            };
-            if c.virtual_devices && g.bus_count > 0 {
-                engine.system_transport = Some(crate::usb_audio::Transport::start(
-                    engine.processor.clone(),
-                    c.buffer,
-                )?);
             }
-            Ok(engine)
         } else {
             let output = device(false, &c.output)?;
             let oc = config(&output, false, c.rate)?;
@@ -1568,14 +1563,6 @@ impl Engine {
             }
             .map_err(|e| e.to_string())?;
             streams.push(stream);
-            let mut apps = Vec::new();
-            for (slot, t) in g.applications.iter().enumerate() {
-                apps.push(crate::process_capture::ProcessCapture::start(
-                    t,
-                    p.clone(),
-                    slot,
-                )?);
-            }
             p.hardware
                 .shared()
                 .generation
@@ -1583,10 +1570,10 @@ impl Engine {
             for s in &streams {
                 s.play().map_err(|e| e.to_string())?;
             }
-            let mut engine = Self {
+            Self {
                 native: None,
                 streams,
-                app_captures: apps,
+                app_captures: Vec::new(),
                 system_transport: None,
                 processor: p,
                 description: format!(
@@ -1595,15 +1582,27 @@ impl Engine {
                     ni,
                     no
                 ),
-            };
-            if c.virtual_devices && g.bus_count > 0 {
-                engine.system_transport = Some(crate::usb_audio::Transport::start(
-                    engine.processor.clone(),
-                    c.buffer,
-                )?);
             }
-            Ok(engine)
+        };
+        if c.virtual_devices && g.bus_count > 0 {
+            engine.system_transport = Some(crate::usb_audio::Transport::start(
+                engine.processor.clone(),
+                c.buffer,
+            )?);
         }
+        engine.app_captures = g
+            .applications
+            .iter()
+            .enumerate()
+            .map(|(slot, target)| {
+                crate::process_capture::ProcessCapture::start(
+                    target,
+                    engine.processor.clone(),
+                    slot,
+                )
+            })
+            .collect();
+        Ok(engine)
     }
 }
 

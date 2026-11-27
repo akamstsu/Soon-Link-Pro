@@ -1,4 +1,5 @@
 use crate::audio::{Config, Engine, Graph, Processor};
+use crate::process_capture::{CaptureState, SharedCaptureState};
 use std::{
     sync::{mpsc, Arc, Mutex},
     thread::{self, JoinHandle},
@@ -9,6 +10,7 @@ pub struct Snapshot {
     pub processor: Arc<Processor>,
     pub description: String,
     status: Arc<Mutex<String>>,
+    app_captures: Vec<SharedCaptureState>,
 }
 impl Snapshot {
     pub fn system_status(&self) -> String {
@@ -16,6 +18,13 @@ impl Snapshot {
             .try_lock()
             .map(|s| s.clone())
             .unwrap_or_else(|_| "设备状态正在更新".into())
+    }
+    pub fn app_capture_state(&self, slot: usize) -> Option<CaptureState> {
+        self.app_captures
+            .get(slot)?
+            .try_lock()
+            .ok()
+            .map(|state| state.clone())
     }
 }
 pub enum Event {
@@ -92,6 +101,7 @@ impl Controller {
                                             processor: active.processor.clone(),
                                             description: active.description.clone(),
                                             status: state.clone(),
+                                            app_captures: active.app_capture_states(),
                                         };
                                         engine = Some(active);
                                         status = Some(state);

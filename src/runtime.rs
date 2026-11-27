@@ -75,21 +75,19 @@ impl Runtime {
                 let mut empty_since = None;
                 let mut last_hosts = Instant::now() - Duration::from_secs(1);
                 while !watch_stop.load(Ordering::Acquire) {
-                    if session.take_show() {
+                    let quitting = watch_quit.load(Ordering::Acquire);
+                    if !quitting && session.take_show() {
                         crate::usb_audio::log("Runtime: IPC show window requested");
                         show(&ctx, &watch_hidden, &watch_native);
                     }
-                    if last_hosts.elapsed() >= Duration::from_secs(1) {
+                    if !quitting && last_hosts.elapsed() >= Duration::from_secs(1) {
                         if automatic && !session.manually_owned() && session.live_hosts() == 0 {
                             let empty = empty_since.get_or_insert_with(Instant::now);
                             if empty.elapsed() >= Duration::from_secs(2) {
-                                watch_quit.store(true, Ordering::Release);
                                 crate::usb_audio::log(
                                     "Runtime: last ASIO host exited; closing managed instance",
                                 );
-                                ctx.send_viewport_cmd(ViewportCommand::Close);
-                                watch_native.wake();
-                                break;
+                                watch_native.request_quit(&watch_quit);
                             }
                         } else {
                             empty_since = None;
@@ -130,15 +128,21 @@ impl Runtime {
             context,
         }
     }
-    pub fn on_update(&self, ctx: &Context) {
+    pub fn on_update(&self, ctx: &Context) -> bool {
         if let Some(native) = &self.native {
             native.paint_pending.store(false, Ordering::Release);
         }
         if self.quit.load(Ordering::Acquire) {
+            // Fallback if a paint ran before the native close event arrived.
             ctx.send_viewport_cmd(ViewportCommand::Close);
+            return true;
         }
+        false
     }
     pub fn show_window(&self) {
+        if self.quit.load(Ordering::Acquire) {
+            return;
+        }
         if let Some(native) = &self.native {
             show(&self.context, &self.hidden, native);
         }
@@ -187,6 +191,20 @@ impl NativeWindow {
                 }
             }
         }
+    }
+    fn request_quit(&self, quit: &AtomicBool) {
+        if !quit.swap(true, Ordering::AcqRel) {
+            // Put the real close event in winit's queue before asking it to
+            // paint. An egui Close command alone needs another frame to be
+            // delivered back as a close event, even if the window is hidden.
+            if unsafe { PostMessageW(self.hwnd as HWND, WM_CLOSE, 0, 0) } == 0 {
+                crate::usb_audio::log(&format!(
+                    "Runtime: native close request failed: {}",
+                    std::io::Error::last_os_error()
+                ));
+            }
+        }
+        self.wake();
     }
     fn restore(&self) {
         unsafe {
@@ -366,6 +384,9 @@ unsafe extern "system" fn tray_proc(hwnd: HWND, message: u32, w: WPARAM, l: LPAR
             return 0;
         }
         if message == TRAY_MESSAGE {
+            if state.quit.load(Ordering::Acquire) {
+                return 0;
+            }
             match l as u32 & 0xffff {
                 NIN_SELECT | NIN_KEYSELECT | WM_LBUTTONUP | WM_LBUTTONDBLCLK => {
                     crate::usb_audio::log("Tray: show window (icon click)");
@@ -411,11 +432,8 @@ unsafe extern "system" fn tray_proc(hwnd: HWND, message: u32, w: WPARAM, l: LPAR
                             show(&state.ctx, &state.hidden, &state.native);
                         }
                         3 => {
-                            state.quit.store(true, Ordering::Release);
                             crate::usb_audio::log("Tray: quit requested");
-                            state.ctx.send_viewport_cmd(ViewportCommand::Close);
-                            state.native.wake();
-                            state.ctx.request_repaint();
+                            state.native.request_quit(&state.quit);
                         }
                         _ => {}
                     }

@@ -1343,6 +1343,26 @@ impl App {
             );
         }
     }
+    fn app_capture_state(&self, group: &str) -> Option<process_capture::CaptureState> {
+        let engine = self.engine.as_ref()?;
+        let path = group.strip_prefix("app:")?;
+        let slot = self
+            .graph
+            .applications
+            .iter()
+            .position(|app| app.exe.to_lowercase() == path)?;
+        engine.app_capture_state(slot)
+    }
+
+    fn app_capture_color(state: &process_capture::CaptureState) -> Color32 {
+        use process_capture::CaptureState::*;
+        match state {
+            Capturing => COLORS[0],
+            Connecting | Waiting => MUTED,
+            Retrying(_) | Unavailable(_) => COLORS[3],
+        }
+    }
+
     fn channel_card(&mut self, ui: &mut Ui, r: Rect, input: bool, card: &ChannelCard) {
         if !ui.is_rect_visible(r.expand(10.0)) {
             return;
@@ -1453,13 +1473,41 @@ impl App {
             2.0,
             card.color,
         );
-        let title_rect = Rect::from_min_max(
+        let mut title_rect = Rect::from_min_max(
             r.min + vec2(24.0, 5.0),
             pos2(
                 r.right() - if stereo { 104.0 } else { 74.0 },
                 r.top() + 32.0,
             ),
         );
+        if input {
+            if let Some(state) = self.app_capture_state(&card.group) {
+                let color = Self::app_capture_color(&state);
+                let badge =
+                    painter.layout_no_wrap(state.label().into(), FontId::proportional(11.0), color);
+                let badge_rect = Rect::from_min_max(
+                    pos2(title_rect.right() - badge.size().x, title_rect.top()),
+                    title_rect.right_bottom(),
+                );
+                title_rect.max.x = (badge_rect.left() - 6.0).max(title_rect.left());
+                ui.interact(
+                    badge_rect,
+                    Id::new(("app_capture", &card.group)),
+                    Sense::hover(),
+                )
+                .on_hover_text(format!(
+                    "{}：{}\n{}",
+                    card.title,
+                    state.label(),
+                    state.detail()
+                ));
+                painter.galley(
+                    badge_rect.left_center() - vec2(0.0, badge.size().y * 0.5),
+                    badge,
+                    color,
+                );
+            }
+        }
         if ui
             .interact(
                 title_rect,
@@ -1723,16 +1771,35 @@ impl App {
                                 continue;
                             }
                             let name = self.graph.channel_name(true, i);
+                            let capture = self.graph.inputs[i]
+                                .key
+                                .rsplit_once(':')
+                                .and_then(|(group, _)| self.app_capture_state(group));
+                            let name_width = LABEL - if capture.is_some() { 30.0 } else { 16.0 };
                             let galley =
-                                single_line(&name, FontId::proportional(12.0), TEXT, LABEL - 16.0);
+                                single_line(&name, FontId::proportional(12.0), TEXT, name_width);
                             let text_height = galley.size().y;
                             p.with_clip_rect(label.shrink(4.0)).galley(
                                 label.min + vec2(8.0, (CELL - text_height) * 0.5),
                                 galley,
                                 TEXT,
                             );
-                            ui.interact(label, Id::new(("matrix_input", i)), Sense::hover())
-                                .on_hover_text(&name);
+                            let response =
+                                ui.interact(label, Id::new(("matrix_input", i)), Sense::hover());
+                            if let Some(state) = capture {
+                                p.circle_filled(
+                                    pos2(label.right() - 10.0, label.center().y),
+                                    3.0,
+                                    Self::app_capture_color(&state),
+                                );
+                                response.on_hover_text(format!(
+                                    "{name}\n{}：{}",
+                                    state.label(),
+                                    state.detail()
+                                ));
+                            } else {
+                                response.on_hover_text(&name);
+                            }
                             for (column, &o) in outputs.iter().enumerate() {
                                 let cell = Rect::from_min_size(
                                     pos2(rect.left() + LABEL + column as f32 * CELL, y),
@@ -2652,8 +2719,13 @@ impl AsioPanel {
 }
 impl eframe::App for App {
     fn update(&mut self, ctx: &Context, _: &mut eframe::Frame) {
-        if let Some(runtime) = &self.runtime {
-            runtime.on_update(ctx);
+        if self
+            .runtime
+            .as_ref()
+            .is_some_and(|runtime| runtime.on_update(ctx))
+        {
+            // Let the window integration finish closing; on_exit saves and stops audio.
+            return;
         }
         if ctx.input(|i| i.viewport().close_requested()) {
             if let Some(runtime) = &self.runtime {
